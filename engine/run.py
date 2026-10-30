@@ -324,10 +324,11 @@ def decode(candidate: dict, unit_ids, opts: common.DecodeOptions | None, workdir
     os.makedirs(d, exist_ok=True)
     crop_key = opts.crop if (opts.crop in common.CROPS) else None
     if crop_key is None:
-        used = {str(u.get("crop_used")).strip().lower() for u in ((rep.get("calibration") or {}).get("units") or [])
-                if isinstance(u, dict) and u.get("crop_used")}
-        used = {c for c in used if c in common.CROPS}
-        crop_key = used.pop() if len(used) == 1 else None
+        # one crop for the whole file only when every unit names the same known crop: a mixed decode with a crop the
+        # decoder cannot name (Trial 25: canola + 'crop 47') labelled every record with the known one
+        used = [str(u.get("crop_used")).strip().lower() if u.get("crop_used") else None
+                for u in ((rep.get("calibration") or {}).get("units") or []) if isinstance(u, dict)]
+        crop_key = used[0] if used and len(set(used)) == 1 and used[0] in common.CROPS else None
     shp = common.write_standard(df, os.path.join(d, f"{tag}_decoded.shp"), extra={"Crop": crop_key})
     stem = os.path.splitext(shp)[0]
     zpath = zip_files([stem + e for e in SHP_EXTS], stem + ".zip")

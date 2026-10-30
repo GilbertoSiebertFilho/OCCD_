@@ -183,6 +183,10 @@ F1_DEFAULT_RANGE = (8, 20)
 PRESELECT = getattr(er, "AOI_PRESELECT_SHARE", 0.20)
 HIDE = getattr(er, "AOI_HIDE_SHARE", 0.01)
 BUFFER_M = getattr(er, "AOI_BUFFER_M", 50.0)
+# the app cuts the records at the boundary itself before the cleaning (the preview keeps every raw reading): the 50 m
+# buffer of the engine / CLI took in the edge passes of the neighbouring fields (Trial 25: two canola tasks of the
+# fields east and south in the cascade, its F10 limits and the sessions); a buffer stays an option in step 3
+AOI_CUT_M = 0.0
 # cleaning methods (engine settings["method"]): the OCCD cascade, the SMS 3-sigma sequence (engine/clean/sms3sigma.py),
 # or both on the same readings and a comparison (engine/clean/compare.py)
 METHODS = ["occd", "sms3sigma", "both"]
@@ -270,6 +274,12 @@ def tw_of_file(path: str, mtime: float):
     """The file's own test weight (median Yld_Mass_W / Yld_Vol_We, lb/bu; None without the columns): converts the
     grower's weight to bushels for the caption of step 3 (the engine makes the same conversion)."""
     return er.file_test_weight(path)
+
+
+def cut_text(buffer_m) -> str:
+    """'the field + 50 m' / 'the field' (records cut at the boundary itself) for the result captions."""
+    b = _float(buffer_m)
+    return "the field" + (f" + {b:g} m" if b else "")
 
 
 def f9_in_bu(p: dict, has_mass: bool, tw_given, tw_file, crop_key) -> str:
@@ -590,7 +600,8 @@ def step3_guesses(D, shp: str):
         cal = rep.get("calibration") or {}
         units_cal = cal.get("units")
         if isinstance(units_cal, list) and units_cal and isinstance(units_cal[0], dict):
-            used = {str(u.get("crop_used")).strip().lower() for u in units_cal if u.get("crop_used")}
+            # a crop only when every unit names the same one (canola + an unnamed 'crop 47' is not canola)
+            used = {str(u.get("crop_used")).strip().lower() if u.get("crop_used") else None for u in units_cal}
             crop_guess = crop_guess or (used.pop() if len(used) == 1 else None)
             sms = {float(u["std_moisture_pct"]) for u in units_cal if u.get("std_moisture_pct") is not None}
             std_m_guess = sms.pop() if len(sms) == 1 else None
@@ -627,7 +638,7 @@ def step3_defaults(shp: str, det: dict, fields: list, crop_guess, tag: str) -> d
               "lag_mode": "auto", "lag_records": 0, "lag_stage": yc.DEFAULT_SETTINGS["lag_stage"],
               "lag_axis": yc.DEFAULT_SETTINGS["lag_axis"],
               "ticket": None, "ticket_unit": "lb", "ticket_basis": "dry", "ticket_moisture": None,
-              "aoi_buffer": float(BUFFER_M), "aoi_clip": True, "std_m": None, "shrink_mode": "auto",
+              "aoi_buffer": float(AOI_CUT_M), "aoi_clip": True, "std_m": None, "shrink_mode": "auto",
               "ref_machine": AUTO, "same_plot": True, "max_factor": 10.0})
     if ENGINE_TICKET_CONFIRMS:
         W["ticket_confirms"] = True
@@ -2207,14 +2218,23 @@ with st.container(border=True):
                 st.caption(f"{aoi['name']}: {aoi['n_polygons']} polygon(s), {aoi['n_plots']} plot(s), "
                            f"{aoi['area_ac']:,.1f} ac.")
             with st.container(horizontal=True, vertical_alignment="bottom"):
-                aoi_buffer = st.number_input("Processing buffer (m)", 0.0, 1000.0, float(BUFFER_M), 10.0,
-                                             key="aoi_buffer", disabled=aoi is None,
-                                             help="Records outside the field + this buffer are dropped before the "
-                                                  "cascade; the buffer keeps the headland context that the pass "
-                                                  "structure, the overlap raster, the flow-delay scan and F7 need.")
+                aoi_buffer = st.number_input("Cleaning buffer beyond the boundary (m)", 0.0, 1000.0, float(AOI_CUT_M),
+                                             10.0, key="aoi_buffer", disabled=aoi is None,
+                                             help="0 m (default): the records are cut at the boundary before the "
+                                                  "cleaning, so the other fields never enter the cascade, the F10 "
+                                                  "limits or the sessions. A buffer (the engine's 50 m) keeps the "
+                                                  "headland context of the passes that run past the boundary (pass "
+                                                  "ends F7, the overlap raster F8, the flow-delay scan) but also takes "
+                                                  "in the edge passes of the neighbouring fields.")
                 aoi_clip = st.toggle("Clip the DIFM file to the field (0 m)", value=True, key="aoi_clip",
                                      disabled=aoi is None,
                                      help="The flagged file keeps every processed point with an In_AOI column.")
+            if aoi is not None:
+                st.caption("The cleaning sees only the records inside the field of interest; the preview of step 2 "
+                           "keeps every raw reading." if not aoi_buffer else
+                           f"The cleaning also takes the records up to {aoi_buffer:g} m outside the field (headland "
+                           "context), which can include the edges of the neighbouring fields; the preview of step 2 "
+                           "keeps every raw reading.")
             sources_footer("aoi", "field of interest: house method")
 
         # ---- harvest sessions and the moisture basis
@@ -2467,9 +2487,8 @@ def show_result(R: dict, where: str = "results"):
                    "yield passes: " + (f"{pv[0]}" if len(pv) == 1 else f"{pv[0]}-{pv[-1]}" if pv else "0")]
         clip = M3.get("clip") or {}
         if clip.get("pre_step_removed"):
-            details.append(f"SMS clip {int(clip.get('sms_clip_equivalent') or 0):,} = field + "
-                           f"{RA.get('buffer_m', BUFFER_M):g} m pre-step {int(clip['pre_step_removed']):,} + S1 "
-                           f"{int(clip.get('s1_removed') or 0):,}")
+            details.append(f"SMS clip {int(clip.get('sms_clip_equivalent') or 0):,} = {cut_text(RA.get('buffer_m'))} "
+                           f"pre-step {int(clip['pre_step_removed']):,} + S1 {int(clip.get('s1_removed') or 0):,}")
         if "GreenStar" in str(sw.get("order") or ""):
             details.append("swath order: GreenStar 4 log files put back in time order")
     else:
@@ -2484,8 +2503,8 @@ def show_result(R: dict, where: str = "results"):
                    + ("; before F7 / F8" if lag.get("stage") == "before_f7" else "")
                    + (f"; {n_orph:,} records from beyond their pass to F7" if n_orph else "") + ")"]
         if RA:
-            details.append(f"{RA.get('n_outside_buffer', 0):,} records outside the field + "
-                           f"{RA.get('buffer_m', BUFFER_M):g} m dropped before the cascade")
+            details.append(f"{RA.get('n_outside_buffer', 0):,} records outside {cut_text(RA.get('buffer_m'))} dropped "
+                           "before the cascade")
     st.caption(" · ".join(details))
     if RL:
         lc = RL.get("closure") or {}

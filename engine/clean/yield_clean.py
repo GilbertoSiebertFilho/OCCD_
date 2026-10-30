@@ -1082,6 +1082,12 @@ def too_few_message(cascade, n_in, n_kept) -> str:
             + " No DIFM-ready file was written.")
 
 
+def aoi_zone(buffer_m) -> str:
+    """The area the cleaning processes: 'the field of interest + 50 m', or 'the field of interest' when the records
+    are cut at the boundary itself (buffer 0 m, the app's default)."""
+    return "the field of interest" + (f" + {float(buffer_m):g} m" if buffer_m else "")
+
+
 def _legacy_boundary(S) -> bool:
     """True when the AOI came from the v1 'boundary' alias: level diagnostics inside the polygon(s) only, nothing
     dropped, clipped or tagged (also for a file with several polygons), so the DIFM-ready file stays the v1 one."""
@@ -1574,22 +1580,23 @@ def clean(path, S, C, log=print, source=None):
         if A.get("buffer_m") is not None:
             inb = aoi_mod.inside(plan, g._x.values, g._y.values, utm, float(A["buffer_m"]))
             drop = ~inb & ~pos_bad
-            crit = f"outside the field of interest + {A['buffer_m']:g} m"
+            crit = f"outside {aoi_zone(A['buffer_m'])}"
             pre_steps.append({"step": "AOI", "name": "Field of interest", "criterion": crit,
                               "source": step_source("aoi", "Menegatti & Molin 2004 (points outside the field "
                                                            "boundary deleted first); buffer: house rule"),
                               "removed": int(drop.sum()), "remaining": int((~drop).sum())})
             log(f"  AOI  removed {int(drop.sum()):>7,}  remaining {int((~drop).sum()):>7,}  ({crit})")
             if drop.any():
-                notes.append(f"AOI: {int(drop.sum()):,} of the {n_in:,} records lie more than {A['buffer_m']:g} m "
-                             f"outside the field of interest ({os.path.basename(A['file'])}) and were set aside before "
+                notes.append(f"AOI: {int(drop.sum()):,} of the {n_in:,} records lie "
+                             + (f"more than {A['buffer_m']:g} m outside" if A["buffer_m"] else "outside")
+                             + f" the field of interest ({os.path.basename(A['file'])}) and were set aside before "
                              "the cleaning (another field, road or yard in the same export)")
             g_aside = g[drop].copy()                   # kept for the whole-file integral (level diagnostics)
             g = g[~drop].copy()
             in0 = in0[~drop]
             if len(g) < MIN_KEPT:
-                raise ValueError(f"only {len(g)} of the {n_in:,} records lie inside the field of interest + "
-                                 f"{A['buffer_m']:g} m ({os.path.basename(A['file'])}): wrong file or wrong field?")
+                raise ValueError(f"only {len(g)} of the {n_in:,} records lie inside {aoi_zone(A['buffer_m'])} "
+                                 f"({os.path.basename(A['file'])}): wrong file or wrong field?")
         aoi_R["n_outside_buffer"] = pre_steps[0]["removed"] if pre_steps else 0
         aoi_R["n_in"] = int(len(g))
         g["In_AOI"] = in0.astype(int)
@@ -2470,7 +2477,7 @@ def clean(path, S, C, log=print, source=None):
         R["level"] = {"export_total_bu": integral, "export_area_ac": integral_area, "scale_ticket_bu": ticket,
                       "factor": factor,
                       "source": f"integral of {icol} x distance x width over the processed set"
-                                + (f" (inside the field of interest + {A['buffer_m']:g} m)" if pre_steps else ""),
+                                + (f" (inside {aoi_zone(A['buffer_m'])})" if pre_steps else ""),
                       "basis": basis, "integral_column": icol, "export_integral_bu": integral,
                       "export_integral_area_ac": integral_area, "factor_from_integral": factor,
                       "processed_set_integral_bu": integral, "n_points_processed": int(len(g)),
@@ -2531,7 +2538,7 @@ def clean(path, S, C, log=print, source=None):
                         "the field total implied by the per-machine tickets")
                 warnings.append(
                     f"level: {what} ({ticket:,.0f} bu) is divided by the integral of the processed set "
-                    f"(inside the field of interest + {A['buffer_m']:g} m: {integral:,.0f} bu over "
+                    f"(inside {aoi_zone(A['buffer_m'])}: {integral:,.0f} bu over "
                     f"{integral_area:,.1f} ac, L = {factor:.4f}), but the records set aside by the AOI carry another "
                     f"{out_bu:,.0f} bu over {out_ac:,.1f} ac (whole file {integral + out_bu:,.0f} bu, L would be "
                     f"{ticket / (integral + out_bu):.4f}): give the ticket(s) of the field of interest only, or run "
