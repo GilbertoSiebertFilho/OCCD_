@@ -1,0 +1,37 @@
+# OCCD — Olds College Cleaning Data: Streamlit settings (read when the app is started from this folder: run_app.bat).
+# The theme is the Olds College palette of assets/brand/BRAND.md (app/brand.py holds the same values for the page).
+# A start from another folder does not read this file: the "occd" configuration of GIT/Cleaning maps/.claude/launch.json
+# repeats the theme as command-line flags. No external font: the system sans-serif, so the app works offline.
+[server]
+maxUploadSize = 4096          # MB: zipped monitor cards can be large; a folder path in step 1 avoids the upload
+
+[browser]
+gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"       # no Deploy button / developer menu at the top right; the settings menu (theme) stays
+
+[global]
+# Open (saved fields) seeds the step-3 inputs through the session state before they are drawn: the duplication
+# warning that Streamlit would log once per process is intended behaviour here
+disableWidgetStateDuplicationWarning = true
+
+[theme]
+base = "light"
+primaryColor = "#00358E"             # Olds College navy: buttons, active states, focus
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F3F7FC"
+textColor = "#1F2937"
+linkColor = "#0077B6"                # the light blue darkened to 4.9:1 on white (AA); #009CDE itself is 3.0:1
+borderColor = "#D7E3F2"
+font = "sans-serif"
+baseRadius = "6px"
+showSidebarBorder = true
+greenColor = "#00B373"               # kept / success
+orangeColor = "#F5A623"              # removed / warnings
+blueColor = "#009CDE"                # accents
+
+[theme.sidebar]
+backgroundColor = "#F3F7FC"
+secondaryBackgroundColor = "#E6EEF8"
+borderColor = "#D7E3F2"

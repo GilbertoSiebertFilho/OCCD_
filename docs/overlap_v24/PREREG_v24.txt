@@ -1,0 +1,46 @@
+OCCD v2.4 (F8 geometry, Y_Offset, local controls, swept-strip maps, flow delay before F7/F8)
+Pre-registration of the before/after evaluation. Written 2026-10-29 BEFORE the new engine code exists and before any
+after-number is computed. The SHA-256 of this file is recorded in PREREG_v24.sha256.
+
+Data: the 7 SMS exports of the overlap tests (T19, T20, T25 Case IH AFS; T22, T23, T29, T30 John Deere GS4), the same
+files as scratchpad/overlap_tests/testC_geometry/scripts/engine_run.py. Default settings, no AOI.
+"v2.3" = the new engine with the legacy switches (chord footprint, no Y_Offset, field reference, no floor, lag applied
+to the output only); it must reproduce the live v2.3 engine exactly (same Keep / Rem_By / Overlap_f on every record).
+"v2.4" = the new defaults. Ablations switch on one change at a time from v2.3.
+CIs: 95 % percentile bootstrap over passes (the pass is the resampled unit), B = 2000, seed 2026.
+
+E0 (identity check, not a prediction): v2.3 legacy mode reproduces the live engine record for record in all 7 trials.
+   If it does not, nothing below is evaluated until the difference is explained.
+
+P1 swept-strip footprint (ablation: footprint only). Population: records alive after F7 whose chord direction changes
+   by >= 2 deg from the previous chord (the testC definition). Prediction: the mean Overlap_f falls in every trial and
+   lands within +/- 2 percentage points of the testC swept-strip value: T19 7.6, T25 13.6, T22 3.5, T23 5.8, T29 5.1,
+   T30 5.2 % (T20: falls, no value given). Refuted if it does not fall in some trial, or misses the band in >= 2.
+
+P2 the predecessor wedge (ablation: footprint only, threshold held at the v2.3 field threshold). Population: records
+   removed by F8 in v2.3 and not above the same threshold with the swept footprint. Prediction: their median yield /
+   own-pass median has a CI that includes 1 in >= 4 of the 7 trials. Refuted if the CI lies wholly below 1 in >= 4
+   trials (then they were real overlap and the chord footprint was right).
+
+P3 raster sensitivity (ablation: footprint only vs v2.3). Shift the raster origin by 0.125 m in x and y; count the
+   records whose F8 decision (at the v2.3 field threshold) flips. Prediction: the flip share falls by >= 36 % relative
+   to v2.3 in every trial. Refuted if it falls by less than 36 % in >= 2 trials.
+
+P4 Y_Offset (John Deere trials T22, T23, T29, T30; ablation: footprint + offset vs footprint only). Population:
+   records alive after F7 with logged width < 0.95 x the trial's full width and |Y_Offset| > 1 ft. Prediction: the
+   median Overlap_f is lower with the offset applied in every JD trial, and the share above 5 % falls. Refuted if the
+   median is not lower in >= 2 of the 4 (that would point to a wrong sign or meaning of Y_Offset).
+
+P5 flow delay before F7/F8 (ablation: lag stage only, on the v2.3 footprint, as the review's X3). D5e = 1 - mean of
+   the first 5 values of Q_end, Q_end = median over passes (>= 60 records alive after F8) of y / own-pass interior
+   median over the last 15 records alive after F8, divided by the median of the interior ratios (records 20..n-21).
+   Prediction (registered by the review of test B): D5e <= 0.10 in T22, T23 and T25. Refuted if > 0.10 in any of them.
+   T29 check (no prediction): report the scan's best lag measured before F7 and after the cascade; the pass-end
+   analysis favoured s = +5 (output position of record i = position i + 5) and the v2.3 scan -5.
+
+P6 local edge-matched controls (v2.4 full). Placebo = median ratio of the no-overlap records against their own local
+   controls (same combine, other pass, <= 15 m, |edge distance difference| <= 4 m, >= 5 controls). Prediction: within
+   0.97-1.03 in every trial with >= 30 matched no-overlap records. Refuted (the controls are biased) otherwise.
+
+Reported without prediction: F8 thresholds, removed / kept counts, mean kept yield, harvested-area coverage, kept
+records per filter, for v2.3, each ablation and v2.4; the maps of the user's turn and pass start drawn both ways.

@@ -1,0 +1,36 @@
+OCCD - Olds College Cleaning Data 2.4.1 - instalação num computador novo
+========================================================================
+
+1. Extraia o zip (botão direito > Extrair tudo) e ponha a pasta "App limpeza DIFM" num disco LOCAL, por exemplo
+   C:\Olds College Projects\App limpeza DIFM
+   Evite Documentos, Downloads e Desktop: nos computadores da Olds College eles ficam na rede,
+   e o ambiente Python e o app ficariam lentos. Não rode direto de dentro do zip.
+
+2. Python 3.12 ou mais novo (testado com 3.14). Se o computador não tem:
+   - https://www.python.org/downloads/  ->  instalar marcando "Add python.exe to PATH"; ou
+   - num terminal:  winget install Python.Python.3.14
+
+3. Dê dois cliques em install_occd.bat. Ele cria um ambiente próprio (.venv) dentro da pasta e instala os pacotes
+   de requirements.txt nas versões testadas de constraints.txt (Streamlit 1.61.1 etc.; precisa de internet, uns
+   600 MB, alguns minutos). Termina com "packages OK" e "Done".
+
+4. Dê dois cliques em run_app.bat. O app abre no navegador em http://localhost:8501
+   (a janela preta precisa ficar aberta enquanto você usa o app; fechar a janela fecha o app).
+
+Os seus campos salvos (pasta workspace) não vêm neste pacote: o computador novo começa com a lista vazia.
+Para levar um campo, copie a pasta dele de workspace\ do computador antigo para workspace\ do novo; o app o lista
+em "Saved fields" na próxima vez que abrir.
+
+Documentação: README.md (inglês), docs\METHOD.md (o método), docs\method_check\OCCD_metodo_e_referencias.pdf
+(a evidência por trás de cada passo, em português) e OCCD_method_and_references.pdf (inglês). Esses dois PDFs
+foram escritos para a 2.3.0: o que mudou na 2.4 (o filtro de sobreposição F8, a busca do atraso de fluxo e os
+mapas em faixas) está em docs\METHOD.md e no README, e a evidência dos testes em docs\overlap_v24\
+(SINTESE_testes_ABC_pt.md em português).
+
+Problemas comuns
+- "Python was not found": instale o Python (passo 2) e rode install_occd.bat de novo.
+- Falha no pip: verifique a internet ou o proxy da rede e rode install_occd.bat de novo (ele retoma).
+- A porta 8501 já está em uso: feche a outra janela do app (ou reinicie o computador).
+- "DLL load failed" ou "The filename or extension is too long" ao abrir o app: a pasta está num caminho comprido
+  demais para o Windows. Use uma pasta curta, como C:\Olds College Projects\App limpeza DIFM, e rode install_occd.bat
+  de novo.

@@ -1,0 +1,17 @@
+# Public copy: code and main docs only. Grower data never goes here.
+*
+!*/
+!.gitignore
+!.streamlit/config.toml
+!*.py
+!*.md
+!*.txt
+!*.bat
+!*.sha256
+!docs/literature/references_verified.csv
+!assets/brand/*
+workspace/
+_archive/
+examples/
+.venv/
+__pycache__/
