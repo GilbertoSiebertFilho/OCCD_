@@ -2510,7 +2510,17 @@ def clean(path, S, C, log=print, source=None):
                 d_as = g_aside[C["speed_mph"]].astype(float) * 1.46667 * g_aside[C["duration_s"]].astype(float)
             a_as = (d_as * w_as / FT2_PER_AC)
             a_as = a_as.where(np.isfinite(a_as), 0)
-            y_as = g_aside[icol].astype(float).fillna(0)
+            # the comparison column computed as ylev was: icol is an export column, or Yld_Dry_Sy (a dry ticket, or a
+            # wet one with its moisture) / the wet mass over the test weight, which only the processed set carries
+            if icol in g_aside:
+                y_as = g_aside[icol].astype(float)
+            else:
+                y_as = (g_aside[C["yield_wet"]].astype(float) if C.get("yield_wet") else
+                        g_aside[C["wet_mass_lbac"]].astype(float) / float(tw))
+                if icol == "Yld_Dry_Sy":
+                    y_as = pd.Series(sessions_mod.dry_symmetric(y_as, g_aside[C["moisture"]].astype(float), Ms),
+                                     index=g_aside.index)
+            y_as = y_as.fillna(0)
             out_bu, out_ac = float((y_as * a_as).sum()), float(a_as.sum())
             R["level"].update(set_aside_integral_bu=out_bu, set_aside_area_ac=out_ac,
                               n_points_set_aside=int(len(g_aside)), file_integral_bu=integral + out_bu,
