@@ -1646,8 +1646,9 @@ show_field_notice()
 with st.container(border=True):
     st.subheader(":material/upload_file: 1 · Input")
     ups = st.file_uploader("Upload files", accept_multiple_files=True, key=upload_key("uploads"),
-                           help="A zip, the .shp + .shx + .dbf + .prj (+ .cpg) of a point export, or raw monitor "
-                                "files (a zipped .cn1 card folder, John Deere JD-Data zips, GreenStar 3 .fdd/.fdl).")
+                           help="A zip, the .shp + .shx + .dbf + .prj (+ .cpg) of a point export or its .kml / .kmz "
+                                "(SMS Export to Google Earth), or raw monitor files (a zipped .cn1 card folder, John "
+                                "Deere JD-Data zips, GreenStar 3 .fdd/.fdl).")
     with st.container(horizontal=True, vertical_alignment="bottom"):
         st.text_input("or a file or folder on this computer", key="local_path",
                       placeholder=r"C:\...\CARD19.cn1   (big cards open faster this way: nothing is copied)")

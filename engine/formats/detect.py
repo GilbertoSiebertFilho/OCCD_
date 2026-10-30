@@ -15,6 +15,10 @@ unpack(paths, dest)
     MAX_MEMBERS members, more than MAX_TOTAL_BYTES unpacked in total, a member with a compression ratio above
     MAX_RATIO and more than 100 MB unpacked (zip bomb), zips nested deeper than MAX_DEPTH, a corrupt zip or member
     (bad CRC, truncated data: the partial file is removed), a member that cannot be written (OSError).
+    Last, every .kml / .kmz of yield POINTS under the roots (an SMS "Export to Google Earth": placemarks with a Point
+    and attributes; engine/formats/kml_points.py) is converted to a point shapefile with the SMS shapefile column names
+    in dest/<kml stem>__kml/, which detect() then lists like any export. A boundary KML is left as it is; a damaged
+    yield KML is a ValueError (a partial export would give a wrong field total).
 
 detect(roots)
     Every point shapefile under the roots with a detectable yield column (engine/clean/yield_clean.detect_columns:
@@ -35,6 +39,7 @@ from __future__ import annotations
 
 import importlib
 import os
+import re
 import shutil
 import stat
 import zipfile
@@ -57,6 +62,7 @@ SUPPORTED_TEXT = (
     "Supported inputs:\n"
     "- yield POINT export as a shapefile (.shp + .shx + .dbf + .prj, zipped or not): Ag Leader SMS, John Deere "
     "Operations Center, or any point file with yield, speed, heading, distance and swath width columns;\n"
+    "- the same points as a .kml / .kmz (SMS 'Export to Google Earth' of the yield points, zipped or not);\n"
     "- Case IH / New Holland AFS Pro 700 card: the whole '<name>.cn1' folder (zipped or the folder itself);\n"
     "- John Deere Gen4 / G5 / X9 display logs: the JD-Data folder with log/*.jdl (one zip per combine is fine);\n"
     "- John Deere GreenStar 3 (2630) card: the RCD/EIC/Documentation folder with the .fdd + .fdl pairs."
@@ -223,7 +229,34 @@ def unpack(paths, dest: str, copy_folders: bool = False, log=print) -> list[str]
                     os.chmod(tgt, stat.S_IREAD | stat.S_IWRITE)
     if budget["zips"]:
         log(f"unpacked {budget['zips']} zip(s), {budget['members']:,} entries, {budget['bytes'] / 1024 ** 2:,.1f} MB")
+    _convert_kml_points(roots, dest, log=log)
     return roots
+
+
+def _convert_kml_points(roots, dest, log=print):
+    """Every KML / KMZ of yield points under the roots -> a point shapefile in dest/<kml stem>__kml/ (kml_points)."""
+    found, seen = [], set()
+    for r in roots:
+        for dp, dn, fn in os.walk(r):
+            dn[:] = [d for d in dn if d not in _SKIP_DIRS]
+            for f in fn:
+                p = os.path.abspath(os.path.join(dp, f))
+                if f.lower().endswith((".kml", ".kmz")) and os.path.normcase(p) not in seen:
+                    seen.add(os.path.normcase(p))
+                    found.append(p)
+    if not found:
+        return
+    from engine.formats import kml_points
+    for p in found:
+        if not kml_points.looks_like_points(p):
+            continue                                      # a boundary or a map overlay, not yield points
+        out = _free_name(os.path.join(dest, os.path.splitext(os.path.basename(p))[0] + "__kml"))
+        try:
+            _, _, notes = kml_points.to_shapefile(p, out, log=log)
+        except OSError as e:
+            raise ValueError(f"{os.path.basename(p)}: the KML could not be converted ({type(e).__name__}: {e})") from None
+        for m in notes:
+            log(m)
 
 
 # ================================================================================================ detect
@@ -231,6 +264,9 @@ def _walk(root):
     for dp, dn, fn in os.walk(root):
         dn[:] = sorted(d for d in dn if d not in _SKIP_DIRS and not d.startswith("."))
         yield dp, sorted(fn)
+
+
+_KML_DIR = re.compile(r"__kml(_\d+)?$")                 # the folders unpack() writes converted KML points into
 
 
 def _exports(root, notes):
@@ -268,10 +304,11 @@ def _exports(root, notes):
                 notes.append(f"{os.path.relpath(path, root)}: no .prj next to it; the cleaning will refuse it "
                              "(it cannot measure distances without a coordinate system)")
             dbf = os.path.join(dp, low[stem + ".dbf"])
+            kml = " (converted from KML)" if _KML_DIR.search(os.path.basename(dp)) else ""
             out.append({"kind": "export", "path": os.path.abspath(path), "n": int(info["features"]),
                         "columns": list(info["fields"]), "geometry_type": gt, "crs": info.get("crs"),
                         "same_key": (stem, int(info["features"]), os.path.getsize(dbf)),
-                        "label": f"Point export · {f} · {int(info['features']):,} points"})
+                        "label": f"Point export{kml} · {f} · {int(info['features']):,} points"})
     return out
 
 
