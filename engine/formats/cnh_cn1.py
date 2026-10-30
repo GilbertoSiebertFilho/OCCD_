@@ -25,7 +25,9 @@ starts with a uint32 record counter that joins the streams. All integers little-
     .tsh payload  [4] flags (bit 3 set on the tasks used as calibration loads), [5:27] the task's calibration curve
                   (11 x uint16), [27:29] moisture-compensation coefficient (x1e-4 per moisture point), [96:100] the
                   display's own task total (kg) computed with the calibration active while harvesting.
-    .tlo (41 B)   [0] logging flag (1 = area counting on), [1] interval x0.1 s (see "time basis"), [2:4] distance of
+    .tlo (41 B)   [0] logging flags: bit 0 = area counting on (the records with bit 0 set are the .tso's count of
+                  logging records); a newer display software also sets bit 2 (Trial 25 card, 2026: values 0, 1, 4, 5,
+                  60 % of the harvest at 5), [1] interval x0.1 s (see "time basis"), [2:4] distance of
                   the record in mm (= speed x [1]), [4:6] active cut width mm, [6:10]/[10:14] lat/lon int32 x1e-8 deg
                   ADDED to the task origin, [14:18] altitude mm, [18] GNSS status (0 = no fix; the position is then
                   0x80000001 or 0), [19:23] GNSS time of day ms (UTC), [23:25] heading x0.1 deg,
@@ -64,7 +66,7 @@ mass and area are inflated together on the records with [1] > 1 s (the totals di
 display's own task totals (.tsh @96) confirm one second per record (decoded / display = 1.003 and 1.002 on the two 2026
 tasks harvested with an unchanged calibration; with byte [1] it would be 1.013 and 1.138).
 
-Kept readings (pre-step, counted by reason): logging flag on, valid GNSS fix, valid flow sample, distance > 0,
+Kept readings (pre-step, counted by reason): logging bit on, valid GNSS fix, valid flow sample, distance > 0,
 interval byte > 0, cut width > 0. Nothing is dropped by yield value (SMS also drops yields outside 5-200 bu/ac; the
 cleaning does that here). Position = midpoint of the two header ends (SMS uses the same point, < 1.3 mm).
 Dry yield: one-sided shrink at the crop's standard moisture (.ycs [4]) - SMS's rule on 100 % of the points - is this
@@ -462,6 +464,7 @@ def read_task(base):
     notes["no .tlh record (counter join)"] = len(co) - len(io)
     notes["records of another length"] = irr_o + irr_h
     O, H, T = O[io], H[ih], to[io]
+    notes["logging byte values"] = sorted(int(v) for v in np.unique(O[:, 0]))
     so = open(base + ".tso", "rb").read()
     olat, olon = struct.unpack_from("<hh", so, 192)
     lat_o, lon_o = _i32(O, 6), _i32(O, 10)
@@ -469,7 +472,7 @@ def read_task(base):
     disp = pd.to_datetime(dict(year=1970 + T[:, 0], month=T[:, 1], day=T[:, 2], hour=T[:, 3], minute=T[:, 4],
                                second=T[:, 5]), errors="coerce")
     df = pd.DataFrame({
-        "ctr": common, "disp_time": disp, "logging": O[:, 0] == 1, "dt_byte": O[:, 1] / 10.0,
+        "ctr": common, "disp_time": disp, "logging": (O[:, 0] & 1) == 1, "dt_byte": O[:, 1] / 10.0,
         "dist_mm": _u16(O, 2).astype(float), "width_m": _u16(O, 4) / 1000.0,
         "lat0": olat + lat_o * 1e-8, "lon0": olon + lon_o * 1e-8,
         "latL": olat + latL * 1e-8, "lonL": olon + lonL * 1e-8, "latR": olat + latR * 1e-8, "lonR": olon + lonR * 1e-8,
@@ -580,6 +583,11 @@ def decode(root, unit_ids, opts: DecodeOptions | None = None, log=print, calibra
                 warnings.append(f"{ext} records of {found} bytes on this card (documented layout {known} bytes): the "
                                 f"first {known} are read, the {found - known} appended bytes are ignored (newer display "
                                 "software; positions, width, flow and moisture decode as on the reference card)")
+        flags = notes["logging byte values"]
+        if any(v not in (0, 1) for v in flags) and ("logging bits",) not in longer_seen:
+            longer_seen.add(("logging bits",))
+            warnings.append(f".tlo[0] holds the values {flags} on this card (newer display software): bit 0 (area "
+                            "counting on) decides the logging state, the other bits are ignored")
         period, _ = _period_s(df)
         off = _utc_offset_h(df)
         if off is not None:
