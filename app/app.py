@@ -25,6 +25,7 @@ after a confirmation. "Start over" (header, right) clears the screen and deletes
 when the open input has unsaved work. The brand (name, version, palette, logos, page icon, the page's small CSS
 and the map colours) is app/brand.py; the theme itself is .streamlit/config.toml.
 """
+import base64
 import copy
 import dataclasses
 import datetime as dt
@@ -606,7 +607,7 @@ def step3_defaults(shp: str, det: dict, fields: list, crop_guess, tag: str) -> d
               f"tag_{SK}": tag or "",
               "lag_mode": "auto", "lag_records": 0, "lag_stage": yc.DEFAULT_SETTINGS["lag_stage"],
               "lag_axis": yc.DEFAULT_SETTINGS["lag_axis"],
-              "ticket": None, "ticket_unit": "lb", "ticket_basis": "wet", "ticket_moisture": None,
+              "ticket": None, "ticket_unit": "lb", "ticket_basis": "dry", "ticket_moisture": None,
               "aoi_buffer": float(BUFFER_M), "aoi_clip": True, "std_m": None, "shrink_mode": "auto",
               "ref_machine": AUTO, "same_plot": True, "max_factor": 10.0})
     if ENGINE_TICKET_CONFIRMS:
@@ -1475,17 +1476,36 @@ if pdk is not None:
             return json.dumps(self, sort_keys=True, default=default_serialize, separators=(",", ":"))
 
 
-def _deck(layers, lon, lat, height):
-    span = max(float(lon.max() - lon.min()) * np.cos(np.radians(float(lat.mean()))), float(lat.max() - lat.min()), 1e-4)
-    zoom = float(np.clip(np.log2(360.0 / span) - 0.6, 9, 17))
-    view = pdk.ViewState(latitude=float(lat.mean()), longitude=float(lon.mean()), zoom=zoom)
-    st.pydeck_chart(_CompactDeck(layers=layers, initial_view_state=view, map_style=None), height=height)
+# satellite basemap under every map: Esri World Imagery as a one-source MapLibre style, sent as a data URL (pydeck
+# passes map_style to the browser as a string; no API key, the attribution shows on the map). Offline, the layers
+# draw on a blank background.
+SATELLITE_STYLE = {
+    "version": 8,
+    "sources": {"satellite": {
+        "type": "raster", "tileSize": 256, "maxzoom": 19,
+        "tiles": ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
+        "attribution": "Imagery © Esri, Maxar, Earthstar Geographics, and the GIS User Community"}},
+    "layers": [{"id": "satellite", "type": "raster", "source": "satellite"}]}
+SATELLITE_STYLE_URL = "data:application/json;base64," + base64.b64encode(json.dumps(SATELLITE_STYLE).encode()).decode()
+
+
+def _deck(layers, lon, lat, height, width=900):
+    # the zoom that fits the whole extent in the map's box with a 10 % margin (web mercator: 512 px per 360 deg of
+    # longitude at zoom 0, latitude stretched by 1 / cos(lat)); the page width is not known here, so the map is
+    # assumed at least `width` px wide
+    lo0, lo1, la0, la1 = float(lon.min()), float(lon.max()), float(lat.min()), float(lat.max())
+    coslat = np.cos(np.radians((la0 + la1) / 2))
+    z_w = np.log2(0.9 * width * 360.0 / (512.0 * max(lo1 - lo0, 1e-6)))
+    z_h = np.log2(0.9 * height * 360.0 * coslat / (512.0 * max(la1 - la0, 1e-6)))
+    zoom = float(np.clip(min(z_w, z_h), 9, 17))
+    view = pdk.ViewState(latitude=(la0 + la1) / 2, longitude=(lo0 + lo1) / 2, zoom=zoom)
+    st.pydeck_chart(_CompactDeck(layers=layers, initial_view_state=view, map_style=SATELLITE_STYLE_URL), height=height)
 
 
 def points_map(pv: pd.DataFrame, aoi=None, height=380):
-    """The point preview coloured by yield; with a field of interest its outline is drawn over the points (pydeck:
-    st.map cannot draw polygons). Falls back to st.map without pydeck."""
-    if aoi is None or pdk is None or pv.empty:
+    """The point preview coloured by yield over the satellite image; with a field of interest its outline is drawn
+    over the points. Falls back to st.map (no satellite, no outline) without pydeck."""
+    if pdk is None or pv.empty:
         st.map(pv, latitude="lat", longitude="lon", color="color", size=2, height=height)
         return
     pts = pv[["lon", "lat"]].copy()
@@ -2124,7 +2144,7 @@ with st.container(border=True):
                                               help="lb, kg and t are converted to bushels with the test weight "
                                                    "(given above in the column mapping, else the file's own, else the "
                                                    "crop table); t = metric tonne (1,000 kg).")
-                basis = st.segmented_control("Basis", ["wet", "dry"], default="wet", required=True, key="ticket_basis",
+                basis = st.segmented_control("Basis", ["wet", "dry"], default="dry", required=True, key="ticket_basis",
                                              help="Wet: the scale weighed the grain as delivered (compared with the "
                                                   "wet integral of the monitor). Dry: the weight is already at the "
                                                   "standard moisture (compared with the dry integral).")
