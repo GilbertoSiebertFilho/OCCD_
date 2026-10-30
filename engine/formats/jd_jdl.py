@@ -33,7 +33,8 @@ of the timing (scan in tools/validate_jd_jdl.py, same optimum on all four combin
                  0.8 s earlier; moved along the bar to the centre of the ACTIVE sections (type-4 states at the same
                  instant; ISO 11783 y is positive to the right of travel - the side is read, not assumed)
     width        DDI 12001 (active cutting width) at t + POS_LAG_MS + WIDTH_LAG_MS (the logged width trails the
-                 section states by 0.8 s)
+                 section states by 0.8 s); without that channel, or when it reads wider than the header (Trial 23:
+                 64.256 m on a 13.716 m header), the sum of the active sections at the position time
     Duration_s   time since the previous flow sample (gaps longer than DT_MAX_S -> the median interval, counted)
     distance     path of the full-width header centre (5 Hz end points) over the reading interval; speed = distance
                  / duration. Ops Center speed is this track speed; the wheel speed DDI 560 reads 0.6-3.3 % low and is
@@ -87,6 +88,8 @@ MOIST_HOLD_MS = 10_000               # over a moisture gap hold the last sample 
 V_MIN_KMH = 0.3                      # below this the combine is stationary (Ops Center keeps >= 0.181 mph = 0.29 km/h)
 POS_LAG_MS = 800                     # the flow sample at t belongs to the header position at t + 0.8 s (Ops Center, docs)
 WIDTH_LAG_MS = 800                   # DDI 12001 (logged width) reports the section state 0.8 s after the position (docs)
+WIDTH_TOL = 0.02                     # a DDI 12001 width more than 2 % over the header's is not an active width
+MONITOR_RATIO_TOL = 0.10             # decoded / monitor wet yield (DDI 39) farther than this from 1: warn
 VALIDATION_NOTE = "docs/formats/jd_jdl.md (Trial 29 2026: Ops Center point match and grain-cart level)"
 OUTLIER_KM = 50.0                    # fixes farther than this from the machine's median position are garbage (lat 0 / lon 0)
 DDI_FLOW, DDI_MOIST, DDI_YWET, DDI_YDRY, DDI_SPEED, DDI_WIDTH, DDI_TW, DDI_STDM = 510, 6, 39, 43, 560, 12001, 8, 75
@@ -839,6 +842,20 @@ def _readings(fds, meta: FileMeta):
     else:
         info["warnings"].append(f"{meta.vin}: no section-control states in the log - readings placed at the "
                                 "full-header centre")
+    # DDI 12001 is the ACTIVE cutting width: a sample wider than the header (the sum of its sections, else the
+    # defined width) cannot be one (Trial 23, X9 1100 with a 13.716 m header: 64.256 m, held by the step lookup over
+    # every later reading - the area 4.7 x too large, the yield 4.7 x too low, F8 removing 93 % of its points)
+    hw = float(secs.width_m.sum()) if secs is not None and len(secs) else meta.width_m
+    wide = d.width_m.values > hw * (1 + WIDTH_TOL) if np.isfinite(hw) and hw > 0 else np.zeros(n0, bool)
+    if wide.any():
+        txt = (f"{meta.vin}: the working-width channel (DDI 12001) reads up to {np.nanmax(d.width_m.values):.3f} m on "
+               f"{int(wide.sum()):,} flow samples, wider than the header ({hw:.3f} m): not the active width")
+        if "sec_width_m" in d:
+            d["width_m"] = d.sec_width_m
+            info["warnings"].append(txt + " - width = sum of active sections")
+        else:
+            d.loc[wide, "width_m"] = hw
+            info["warnings"].append(txt + " - those samples take the header width (no section states to use)")
     if np.isnan(d.width_m.values).all():
         if "sec_width_m" in d:
             d["width_m"] = d.sec_width_m
@@ -1019,6 +1036,11 @@ def decode_detailed(root: str, unit_ids=None, opts: C.DecodeOptions | None = Non
         with np.errstate(invalid="ignore", divide="ignore"):
             ratio = out.Yld_Vol_We.values / r.y39.values
         okr = np.isfinite(ratio) & (r.y39.values > 10) & (r.speed_kmh.values > 2)
+        if okr.sum() >= 30 and abs(float(np.median(ratio[okr])) - 1) > MONITOR_RATIO_TOL:
+            report["warnings"].append(
+                f"{m0.vin}: the decoded wet yield is {100 * float(np.median(ratio[okr])):.0f} % of the monitor's own wet "
+                f"yield (DDI 39, median over {int(okr.sum()):,} readings; validated combines read 99.9 %): the area "
+                "(width or distance) or the mass flow was read wrong - check this decode before cleaning it")
         details.append(dict(
             machine=m0.vin, model=m0.model, client=m0.client, farm=m0.farm, field=m0.field, crop=m0.crop,
             variety=m0.variety, display=m0.display, software=m0.software, files=len(ms), n_flow_samples=int(len(d)),
