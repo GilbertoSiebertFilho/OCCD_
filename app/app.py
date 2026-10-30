@@ -133,8 +133,8 @@ SECTION_TABS = ["Corrections", "Field of interest", "Sessions & moisture", "Comb
 PARAM_LABEL = {"min_pct": "Min %", "max_pct": "Max %", "min_mph": "Min mph", "max_mph": "Max mph",
                "max_change_per_s": "Max change per s (0.20 = 20 %)", "max_rel_error": "Max error (0.50 = 50 %)",
                "min_points": "Min points", "max_deg_per_s": "Max deg/s", "drop_start": "Drop at start",
-               "drop_end": "Drop at end", "auto_tolerance_pct": "Auto tolerance %", "min_lbac": "Min lb/ac",
-               "max_lbac": "Max lb/ac", "k_sd": "k (SD)", "half_window": "Half window (points)",
+               "drop_end": "Drop at end", "auto_tolerance_pct": "Auto tolerance %", "min_lbac": "Min wet mass lb/ac",
+               "max_lbac": "Max wet mass lb/ac", "k_sd": "k (SD)", "half_window": "Half window (points)",
                "max_rel_dev": "Max deviation (0.30 = 30 %)",
                "fallback_threshold": "Fallback when auto cannot decide (0.10 = 10 %)",
                "min_threshold": "Floor of the auto threshold (0.05 = 5 %)",
@@ -270,6 +270,25 @@ def tw_of_file(path: str, mtime: float):
     """The file's own test weight (median Yld_Mass_W / Yld_Vol_We, lb/bu; None without the columns): converts the
     grower's weight to bushels for the caption of step 3 (the engine makes the same conversion)."""
     return er.file_test_weight(path)
+
+
+def f9_in_bu(p: dict, has_mass: bool, tw_given, tw_file, crop_key) -> str:
+    """The F9 window (wet mass, lb/ac) as wet yield in bu/ac, for the caption under F9 (Trial 25: 20-200 typed as bu/ac
+    removed every point). With a wet-mass column the file's own Yld_Mass_W / Yld_Vol_We links mass and yield (else the
+    test weight given, else the crop table); without one F9 is the wet yield x the test weight given (engine), so that
+    one is used."""
+    if has_mass:
+        tw, src = ((tw_file, "the file's own Yld_Mass_W / Yld_Vol_We") if tw_file else
+                   (tw_given, "the test weight given") if tw_given else
+                   (common.CROPS[crop_key][0], f"crop table: {crop_key}") if crop_key in common.CROPS else (None, None))
+    else:
+        tw, src = (tw_given, "the test weight given") if tw_given else (None, None)
+    if not tw:
+        return ("In bu/ac: give the test weight (Column mapping) to see the wet yield this window stands for." if has_mass
+                else "No wet-mass column: F9 needs the test weight (Column mapping); without it F9 is switched off.")
+    lo, hi = float(p["min_lbac"]), float(p["max_lbac"])
+    return (f"= {lo / tw:,.1f}–{hi / tw:,.1f} bu/ac of wet yield at {tw:.2f} lb/bu ({src}). For a wet-yield window "
+            f"of A–B bu/ac, enter A × {tw:.2f} and B × {tw:.2f} lb/ac.")
 
 
 @st.cache_data(show_spinner=False)
@@ -2083,6 +2102,9 @@ with st.container(border=True):
                         except (KeyError, ValueError, TypeError):
                             rule = finfo["rule"]
                         st.caption(f"Removes points with {rule}")
+                        if fid == "F9":
+                            st.caption(f9_in_bu(p, bool(eff.get("wet_mass_lbac")), tw_f9, tw_of_file(shp, mtime(shp)),
+                                                crop_key))
                         if fid == "F1":
                             lo, hi = F1_CROP_RANGES.get(crop_key, F1_DEFAULT_RANGE)
                             st.caption(f"Default for {crop_key or 'an unknown crop (small cereals)'}: {lo:g}-{hi:g} % "
