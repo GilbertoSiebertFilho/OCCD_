@@ -645,11 +645,14 @@ def list_units(root: str) -> list[C.Unit]:
         m0 = ms[0]
         ts = pd.Timestamp(st, unit="ms", tz="UTC")
         te = pd.Timestamp(en, unit="ms", tz="UTC")
+        # a tractor (grain cart) or a sprayer logs the same field and crop on the same display: no mass-flow channel
+        harvest = any(v[0] == DDI_FLOW for m in ms for v in m.channels.values())
         label = (f"{m0.field or '(no field)'} · {_season(m0)} · {m0.crop or '?'} · {m0.model} {m0.vin[-6:]} · "
-                 f"{ts:%d %b %Y %H:%M} - {te:%d %b %Y %H:%M} UTC · {len(ms)} file(s)")
+                 f"{ts:%d %b %Y %H:%M} - {te:%d %b %Y %H:%M} UTC · {len(ms)} file(s)"
+                 + ("" if harvest else " · no grain-flow channel (not a combine)"))
         units.append(C.Unit(id=key, label=label, field=m0.field, crop=m0.crop, year=_season(m0),
                             start=ts.isoformat(), end=te.isoformat(), machine=m0.vin, n_records=n_s,
-                            default=_season(m0) == latest))
+                            default=harvest and _season(m0) == latest))
     return units
 
 
@@ -950,7 +953,7 @@ def decode_detailed(root: str, unit_ids=None, opts: C.DecodeOptions | None = Non
     report = {k: None for k in C.DECODE_REPORT_KEYS}
     report.update(format=FORMAT_ID, label=LABEL, units=list(sel), warnings=list(warns))
     pre_total = {k: 0 for k in PRE_STEP_REASONS}
-    frames, details, n_read = [], [], 0
+    frames, details, n_read, skipped = [], [], 0, []
     resolved = None
     override = False
     for uid in sel:
@@ -962,6 +965,13 @@ def decode_detailed(root: str, unit_ids=None, opts: C.DecodeOptions | None = Non
             fd = decode_file(m.path, m)
             report["warnings"].extend(fd.warnings)
             fds.append(fd)
+        if not any((DDI_FLOW, "mg1sec-1") in fd.samples for fd in fds):
+            # a tractor with the grain cart in the same field (Trial 23: a 9460R among the two combines, selected by
+            # the field of interest): no grain flow, so the unit is left out and the combines are decoded
+            skipped.append(m0.vin)
+            report["warnings"].append(f"{m0.vin} ({m0.model}): no mass-flow channel (DDI 510) in its {len(ms)} log(s) - "
+                                      "not a combine (a tractor with the grain cart?); this unit was left out")
+            continue
         n_inc = sum(fd.n_incomplete for fd in fds)
         if n_inc:
             report["warnings"].append(f"{m0.vin}: {n_inc} malformed position record(s) (time deltas without value "
@@ -1050,6 +1060,9 @@ def decode_detailed(root: str, unit_ids=None, opts: C.DecodeOptions | None = Non
             ratio_to_monitor_wet_yield_p05_p95=([float(np.percentile(ratio[okr], 5)),
                                                  float(np.percentile(ratio[okr], 95))] if okr.any() else None),
             **info))
+    if skipped and not frames:
+        raise JdlError(f"{', '.join(skipped)}: no mass-flow channel (DDI 510) in the logs - not a harvest log? Select the "
+                       "combines' units")
     df = (pd.concat(frames, ignore_index=True) if frames
           else pd.DataFrame(columns=C.STANDARD_NAMES + ["lon", "lat"] + DIAG_COLUMNS))
     crop, tw, sm = resolved if resolved else (None, None, None)
