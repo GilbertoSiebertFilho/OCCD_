@@ -161,7 +161,7 @@ AUTO = "auto"
 CROP_UNKNOWN = "(not set: small-cereal defaults)"
 CORR_KEYS = ["lag_mode", "lag_records", "lag_auto", "lag_stage", "lag_axis", "harmonise", "ticket", "ticket_unit",
              "ticket_basis", "ticket_moisture", "ticket_confirms", "aoi_buffer", "aoi_clip", "std_m", "shrink_mode", "add_sym",
-             "ref_machine", "same_plot", "max_factor", "crop_clean"]
+             "ref_machine", "same_plot", "max_factor", "from_dataset", "crop_clean"]
 TICKET_UNITS = list(getattr(er, "TICKET_UNITS", ("lb", "kg", "bu", "t")))
 TICKET_UNIT_LABEL = {"lb": "lb", "kg": "kg", "bu": "bu", "t": "t (metric)"}
 # the engine's machines settings know the ticket closure test (machines.ticket_confirms) in a v2 ticket engine
@@ -260,8 +260,8 @@ def strip_count_text(n_drawn: int, n_file: int) -> str:
 
 
 @st.cache_data(max_entries=8, show_spinner=False)
-def machines_of(path: str, mtime: float, mcol, ycol) -> list:
-    return er.machine_summary(path, mcol, ycol)
+def machines_of(path: str, mtime: float, mcol, ycol, dcol=None) -> list:
+    return er.machine_summary(path, mcol, ycol, dcol)
 
 
 @st.cache_data(max_entries=8, show_spinner=False)
@@ -639,7 +639,7 @@ def step3_defaults(shp: str, det: dict, fields: list, crop_guess, tag: str) -> d
               "lag_axis": yc.DEFAULT_SETTINGS["lag_axis"],
               "ticket": None, "ticket_unit": "lb", "ticket_basis": "dry", "ticket_moisture": None,
               "aoi_buffer": float(AOI_CUT_M), "aoi_clip": True, "std_m": None, "shrink_mode": "auto",
-              "ref_machine": AUTO, "same_plot": True, "max_factor": 10.0})
+              "ref_machine": AUTO, "same_plot": True, "max_factor": 10.0, "from_dataset": True})
     if ENGINE_TICKET_CONFIRMS:
         W["ticket_confirms"] = True
     W.update(sms_widget_defaults())
@@ -723,6 +723,7 @@ def apply_settings_to_widgets(S: dict, shp: str, rec: dict, D, cand):
     machines = [str(m) for m in ((rec.get("summary") or {}).get("machines") or [])]
     W["ref_machine"] = ref if (ref == AUTO or str(ref) in machines) else AUTO
     W["same_plot"] = bool(MC.get("same_plot_only", True))
+    W["from_dataset"] = bool(MC.get("from_dataset", True))
     if _float(MC.get("max_factor")) is not None:
         W["max_factor"] = _float(MC["max_factor"]) * 100.0
     if ENGINE_TICKET_CONFIRMS and "ticket_confirms" in MC:
@@ -1343,8 +1344,8 @@ def render_tree():
                 else:
                     tree_row("Harmonise combines", notes.get("harmonise", "") if ss.get("harmonise", True) else
                              ("off" if R else ""), anchor="combines", key="harmonise",
-                             help="Only acts when a combine id column has more than one value and the difference is "
-                                  "proven.")
+                             help="Only acts when the data name more than one combine (a combine id column, or "
+                                  "different sources at the end of the dataset names) and the difference is proven.")
             tree_heading("Sessions & moisture")
             with st.container(gap=None):
                 tree_row("Symmetric dry yield column (Yld_Dry_Sy)", notes.get("add_sym", "") if ss.get("add_sym", True)
@@ -2265,11 +2266,26 @@ with st.container(border=True):
 
         # ---- combines
         with tabs[len(UI_GROUPS) + 3]:
+            from_dataset = True
             if D:
                 mrows = [{"machine": str(m.get("machine")), "n": int(m.get("n_readings") or 0),
                           "mean_yield": m.get("mean_bu_ac_dry")} for m in (D["report"].get("machines") or [])]
+            elif eff.get("machine"):
+                mrows = machines_of(shp, mtime(shp), eff.get("machine"), eff.get("yield"))
             else:
-                mrows = machines_of(shp, mtime(shp), eff.get("machine"), eff.get("yield")) if eff.get("machine") else []
+                # no combine id column: the engine tells the combines apart by the sources at the end of the dataset
+                # names when they differ (machines.from_dataset); one source (or none) is one combine
+                mrows = machines_of(shp, mtime(shp), None, eff.get("yield"), eff.get("dataset")) if eff.get("dataset") else []
+                if len(mrows) > 1:
+                    from_dataset = st.toggle("Tell the combines apart by the dataset names", value=True,
+                                             key="from_dataset",
+                                             help="The file has no combine id column, but its dataset names end with "
+                                                  "different sources in parentheses (a display serial, or the maker of "
+                                                  "the monitor: '(CNH Industrial N.V.)', '(Trimble Navigation)'): each "
+                                                  "source is taken as one combine for the overlap filter F8, the "
+                                                  "sessions and the harmonisation. Off: the whole file is one combine.")
+                if len(mrows) < 2 or not from_dataset:
+                    mrows = []
             machines = [r["machine"] for r in mrows]
 
             def machine_label(m):
@@ -2282,8 +2298,9 @@ with st.container(border=True):
                 return s + (f", mean {r['mean_yield']:.1f} bu/ac)" if r.get("mean_yield") is not None else ")")
             harmonise = bool(ss.get("harmonise", True))         # owned by the switch in the processing tree
             st.subheader("Harmonise combines", anchor="combines")
-            st.caption("Only acts when a combine id column has more than one value and the difference is proven at "
-                       "30 m and 50 m (CIs exclude 1, factors agree within 2 %)." if harmonise else TREE_OFF_NOTE)
+            st.caption("Only acts when the data name more than one combine (a combine id column, or different "
+                       "sources at the end of the dataset names) and the difference is proven at 30 m and 50 m (CIs "
+                       "exclude 1, factors agree within 2 %)." if harmonise else TREE_OFF_NOTE)
             with st.container(horizontal=True, vertical_alignment="bottom"):
                 ref_machine = st.selectbox("Reference combine", [AUTO] + machines, key="ref_machine",
                                            disabled=not harmonise or len(machines) < 2, format_func=machine_label)
@@ -2326,8 +2343,11 @@ with st.container(border=True):
                         totals[str(r["machine"])] = float(r["wet_bu"])
             elif machines:
                 st.caption(f"One combine in the data ({machines[0]}): nothing to harmonise.")
+            elif not from_dataset:
+                st.caption("Combines from the dataset names switched off: the file is treated as one combine.")
             else:
-                st.caption("No combine id column mapped: the file is treated as one combine.")
+                st.caption("No combine id column mapped and no different sources at the end of the dataset names: the "
+                           "file is treated as one combine.")
             sources_footer("machines", "machine harmonisation: house method")
 
         # ---- the SMS 3-sigma sequence (engine/clean/sms3sigma.py)
@@ -2412,7 +2432,7 @@ with st.container(border=True):
              "moisture": {"standard_pct": std_m, "shrink": shrink_mode, "add_symmetric_column": bool(add_sym)},
              "machines": {"harmonise": bool(harmonise), "reference": ref_machine or AUTO,
                           "totals_bu": totals or None, "same_plot_only": bool(same_plot),
-                          "max_factor": float(max_factor) / 100.0}}
+                          "max_factor": float(max_factor) / 100.0, "from_dataset": bool(from_dataset)}}
         if ticket_dict is not None:                     # the grower's weight: the v2 dict (unit, basis, moisture)
             S["scale_ticket"] = dict(ticket_dict)
         if ENGINE_TICKET_CONFIRMS:
@@ -2621,7 +2641,8 @@ def show_result(R: dict, where: str = "results"):
             if not RM:
                 st.caption("One combine (or no combine id column): nothing to harmonise.")
             else:
-                st.caption(f"Combine column {RM.get('column')}; reference {RM.get('reference') or '-'}; "
+                st.caption(f"Combines by the {RM.get('basis') or ('column ' + str(RM.get('column')))}; reference "
+                           f"{RM.get('reference') or '-'}; "
                            f"method: {RM.get('method') or RM.get('rule') or '-'}")
                 means = RM.get("means")
                 if isinstance(means, dict) and means:

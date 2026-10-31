@@ -310,7 +310,9 @@ def session_keys(g, C: dict, time_ok: bool, t: pd.Series | None, machine: pd.Ser
         basis = "the whole dataset (no time, no dataset column)" + (f"; day from the date column {dcol!r}" if dcol
                                                                      else "")
     if several:
-        key = np.array([_join_key(m, k) for m, k in zip(mach, key)], dtype=object)
+        # '<machine>|<key>', unless the key already names the machine (the combines told apart by the source at the
+        # end of the dataset names: 'A (CNH Industrial N.V.)')
+        key = np.array([k if f"({m})" in str(k) else _join_key(m, k) for m, k in zip(mach, key)], dtype=object)
     key = np.array([str(k)[:SESSION_WIDTH] for k in key], dtype=object)
     day = np.array([str(d)[:DAY_WIDTH] for d in day], dtype=object)
     return day, key, {"basis": basis, "n_sessions": int(len(set(key)))}

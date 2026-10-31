@@ -78,7 +78,8 @@ Steps
      on a 0.25 m raster across machines; "chord" = the v2.3 rectangle. The F8 overlap threshold is "auto" (the field's
      own dose-response) or a fixed fraction. Reference "local" (v2.4): every record of the pass interiors (>= 15
      records alive after F7 on both sides) against its local no-overlap controls (local_control_ratio: same combine
-     by combine_key - the machine column, else the SMS serial or the Ops Center log -, another pass, within max(15 m,
+     by combine_key - the machine column, else the sources in the dataset names, the SMS serial or the Ops Center
+     log -, another pass, within max(15 m,
      1.5 header widths), the same distance from the harvested edge within 4 m, >= 5 controls), per band the median
      ratio over the no-overlap records' own median ratio (the placebo); with fewer than 30 no-overlap records that
      have controls it falls back to the v2.3 reference with a warning. Reference "field" (v2.3): WITHIN each combine against that combine's own no-overlap band, pooled by band
@@ -112,7 +113,9 @@ Steps
      and moisture difference between consecutive sessions of a machine, and the recommendation ("map Yld_Dry_Sy and
      keep Harv_Day as a block" when sessions differ by > 2 moisture points or > 20 % of the readings fall below Ms
      under one-sided shrink; house rules). Figure fig_clean_sessions.png.
-  4. several combines (a machine column with > 1 value, machines.harmonise true; engine/clean/machines.py): paired
+  4. several combines (a machine column with > 1 value; without one, with machines.from_dataset, two or more
+     sources in parentheses at the end of the dataset names, each source a combine: sms3sigma.dataset_machines;
+     machines.harmonise true; engine/clean/machines.py): paired
      30 m and 50 m cells (>= 5 kept points of both machines with <= machines.pair_max_overlap = 2 % of the footprint
      already cut, same plot when a plan exists) against the reference machine (machines.reference "auto" = most kept
      points; the factor goes on the OTHER machines); f = exp(mean(log(ref / m))) with a block-bootstrap CI over pass
@@ -318,10 +321,12 @@ DEFAULT_SETTINGS = {
     # pair_max_overlap: the paired cells use only kept records with <= this share of the footprint already cut
     # ticket_confirms: a paired factor above max_factor is still applied when the grower's weight confirms it (the
     # monitor total with the factor within ticket_close_tol of the ticket, without it more than 3 x that away)
+    # from_dataset: without a machine column, the combines are told apart by the sources SMS writes in parentheses at
+    # the end of the dataset names when they differ (sms3sigma.dataset_machines); false = one combine, as before
     "machines": {"harmonise": True, "reference": "auto", "totals_bu": None, "min_pairs": 30, "min_pass_pairs": 5,
                  "ci": 0.95, "min_factor": 0.01, "max_factor": 0.10, "same_plot_only": True, "bootstrap_reps": 1000,
                  "seed": 2026, "pair_max_overlap": machines_mod.PAIR_MAX_OVERLAP, "ticket_confirms": True,
-                 "ticket_close_tol": machines_mod.TICKET_CLOSE_TOL},
+                 "ticket_close_tol": machines_mod.TICKET_CLOSE_TOL, "from_dataset": True},
     # cleaning method: "occd" (the cascade above), "sms3sigma" (the SMS 3-sigma sequence, settings in "sms3sigma")
     # or "both" (both on the same readings, then engine/clean/compare.py writes the comparison)
     "method": "occd",
@@ -639,6 +644,8 @@ def merge_settings(user=None) -> dict:
     if not isinstance(Ma["ticket_confirms"], bool):
         raise ValueError(f"machines.ticket_confirms must be true or false, not {Ma['ticket_confirms']!r}")
     Ma["ticket_close_tol"] = _num(Ma["ticket_close_tol"], "f", "machines.ticket_close_tol", 1e-9, 0.5)
+    if not isinstance(Ma["from_dataset"], bool):
+        raise ValueError(f"machines.from_dataset must be true or false, not {Ma['from_dataset']!r}")
     # ---- cleaning method
     m = str(S["method"] if S["method"] is not None else "occd").strip().lower()
     if m not in METHOD_ALIASES:
@@ -1393,11 +1400,15 @@ def local_control_ratio(yv, f, machine, pass_id, x, y, edge, pop, radius=15.0, e
 
 
 def combine_key(g, C) -> tuple:
-    """(key per record, basis) of the combine that logged each record: the machine column; else the display serial
-    SMS writes at the end of Case IH / Ag Leader dataset names; else the Ops Center log (a record-id restart inside a
-    dataset, ' #log' of the processing key: one log per combine and task); else one combine for the whole file."""
+    """(key per record, basis) of the combine that logged each record: the machine column; else the sources SMS writes
+    in parentheses at the end of the dataset names when they differ (the _machine of clean(), machines.from_dataset);
+    else the display serial SMS writes at the end of Case IH / Ag Leader dataset names; else the Ops Center log (a
+    record-id restart inside a dataset, ' #log' of the processing key: one log per combine and task); else one combine
+    for the whole file."""
     if C.get("machine"):
         return g["_machine"].astype(str).to_numpy(), f"machine column {C['machine']!r}"
+    if g["_machine"].nunique() > 1:
+        return g["_machine"].astype(str).to_numpy(), sms_mod.DATASET_MACHINES_BASIS
     if C.get("dataset"):
         ds = g[C["dataset"]].astype(str)
         if sms_mod.dataset_serials(ds):
@@ -1407,7 +1418,7 @@ def combine_key(g, C) -> tuple:
             logs = g["_ds_key"].astype(str).str.extract(r"( #log\d+)$")[0]
             if logs.notna().any():
                 return (ds + logs.fillna("")).to_numpy(), "Ops Center log (record-id restart) of each dataset"
-    return np.array(["M1"] * len(g), dtype=object), "one combine (no machine column, serial or log id)"
+    return np.array(["M1"] * len(g), dtype=object), "one combine (no machine column, source, serial or log id)"
 
 
 def lag_source_index(pass_id, lag_s):
@@ -1611,7 +1622,22 @@ def clean(path, S, C, log=print, source=None):
                      + (f", {plan.n_plots} plots" if plan.is_plan else "") + f"); {aoi_R['n_outside_aoi']:,} records "
                      "outside it" + (f", {aoi_R['n_in_plots']:,} inside the plots" if plan.is_plan else ""))
     n_read, n_in = n_in, int(len(g))            # n_in: the processed set (the cascade's 100 %)
-    g["_machine"] = g[C["machine"]].astype(str) if C.get("machine") else "M1"
+    # the combine of every record: the machine column; else (machines.from_dataset) the sources SMS writes in
+    # parentheses at the end of the dataset names when they differ (an export of several monitors); else one combine
+    machine_basis = f"machine column {C['machine']!r}" if C.get("machine") else None
+    dm = (sms_mod.dataset_machines(g[C["dataset"]]) if not C.get("machine") and C.get("dataset")
+          and S["machines"]["from_dataset"] else None)
+    if C.get("machine"):
+        g["_machine"] = g[C["machine"]].astype(str)
+    elif dm is not None:
+        g["_machine"], machine_basis = dm[0], f"{dm[1]} ({C['dataset']})"
+        per = pd.Series(dm[0]).value_counts()
+        notes.append(f"combines: no machine column, so the source at the end of the dataset names tells them apart - "
+                     f"{len(per)} combines: " + ", ".join(f"{m} ({n:,} records)" for m, n in per.items())
+                     + "; the F8 controls, the sessions and the harmonisation keep to each (settings "
+                     "machines.from_dataset false: one combine)")
+    else:
+        g["_machine"] = "M1"
 
     # ---- chronological order
     time_ok = False
@@ -1957,7 +1983,7 @@ def clean(path, S, C, log=print, source=None):
         if ref_used == "local":
             mkey, mkey_basis = combine_key(g, C)
         else:
-            mkey, mkey_basis = g._machine.astype(str).to_numpy(), "machine column" if C.get("machine") else "one combine"
+            mkey, mkey_basis = g._machine.astype(str).to_numpy(), machine_basis or "one combine"
         sdf = pd.DataFrame({"y": y[dose_sel].values, "o": g.Overlap_f[dose_sel].values, "m": mkey[dose_sel]})
         sdf["band"] = pd.cut(sdf.o, DOSE_BANDS, labels=DOSE_LABELS)
         if ref_used == "local":
@@ -2021,8 +2047,9 @@ def clean(path, S, C, log=print, source=None):
                     notes.append(f"F8: {len(f8_excluded)} combine(s) found no local controls and are not in the "
                                  "dose-response: " + ", ".join(f8_excluded))
                 if n_keys == 1 and C.get("dataset") and mkey_basis.startswith("one combine"):
-                    notes.append("F8: the export names no combine (no machine column, SMS serial or Ops Center log): "
-                                 "the local controls cannot keep to the same combine")
+                    notes.append("F8: the export names no combine (no machine column, no differing sources or serial "
+                                 "in the dataset names, no Ops Center log): the local controls cannot keep to the same "
+                                 "combine")
             else:
                 ref_used = "field"
                 mkey = g._machine.astype(str).to_numpy()
@@ -2403,10 +2430,11 @@ def clean(path, S, C, log=print, source=None):
             ticket_test = machines_mod.ticket_closure(tests, applied, decision, ref, Mset, integ_by_machine,
                                                       ticket_cmp, warnings, notes)
     if totals:
-        if not C.get("machine") and set(str(k) for k in totals) != set(machs):
-            warnings.append(f"machines.totals_bu names {sorted(totals)} but the file has no machine column (settings "
-                            f"cols.machine): the tickets cannot be matched to combines and are ignored; give the field "
-                            "total as scale_ticket_bu")
+        if not machine_basis and set(str(k) for k in totals) != set(machs):
+            warnings.append(f"machines.totals_bu names {sorted(totals)} but the file names no combine (no machine "
+                            f"column - settings cols.machine - and no differing sources in the dataset names): the "
+                            "tickets cannot be matched to combines and are ignored; give the field total as "
+                            "scale_ticket_bu")
         else:
             if ref is None:
                 kept_by = pd.Series(alive).groupby(g._machine.values).sum()
@@ -2441,7 +2469,8 @@ def clean(path, S, C, log=print, source=None):
     if harm_on:
         harm = g._machine.map(applied).astype(float)
     if several or levels_m is not None:
-        R["machines"] = {"column": C["machine"], "reference": ref, "method": method, "rule": method,
+        R["machines"] = {"column": C["machine"], "basis": machine_basis or "one combine", "reference": ref,
+                         "method": method, "rule": method,
                          "n_points": {m: means[m]["n"] for m in machs}, "n_kept": {m: means[m]["n_kept"] for m in machs},
                          "means": means, "tests": tests, "factor_applied": applied, "decision": decision,
                          "per_machine_totals": levels_m, "validation": validation, "ticket_test": ticket_test,

@@ -104,6 +104,7 @@ PER_AREA_COLUMNS = ["Yld_Vol_Dr", "Yld_Vol_We", "Yld_Mass_W", "Yld_Mass_D", "Fue
 INVERSE_AREA_COLUMNS = ["Prod_ac_h_", "Prod_ac_h", "Fuel_Eff__"]
 PER_DISTANCE_COLUMNS = ["Fuel_Eff_m"]
 SERIAL_RE = re.compile(r"\((\d{3,})\)\s*$")
+SOURCE_RE = re.compile(r"\(([^()]+)\)\s*$")      # the text in the parentheses that end a dataset name
 
 
 FT = 0.3048
@@ -380,6 +381,30 @@ def dataset_serials(names) -> set:
     return out
 
 
+def dataset_source(name) -> str | None:
+    """The source SMS writes in parentheses at the end of a dataset name: the display serial of a Case IH / Ag Leader
+    display ('26/09/20-18:19:28 (219741)' -> '219741'), else the maker or the monitor the data came from
+    ('A (CNH Industrial N.V.)', 'Harvest 2026 (Trimble Navigation)', 'TaskName 9/16/2026 (GreenStar 4 Monitor)');
+    None when the name does not end with one."""
+    m = SOURCE_RE.search(str(name))
+    return (m.group(1).strip() or None) if m else None
+
+
+DATASET_MACHINES_BASIS = "source in parentheses at the end of the dataset names"
+
+
+def dataset_machines(names):
+    """(combine id per name, basis) when every dataset name ends with a source (dataset_source) and at least two
+    sources differ: an SMS export that holds several monitors (a CNH card next to a Trimble display, two Case IH
+    displays); the id is the source. None otherwise: one source (every task '(GreenStar 4 Monitor)', a single display
+    serial) does not tell combines apart, and a name without a source leaves its combine unknown."""
+    names = pd.Series(names).astype(str)
+    src = {n: dataset_source(n) for n in names.unique()}
+    if any(v is None for v in src.values()) or len(set(src.values())) < 2:
+        return None
+    return names.map(src).to_numpy(dtype=object), DATASET_MACHINES_BASIS
+
+
 def resolve_groups(g, C: dict, P: dict, src_format: str | None, session_keys=None) -> tuple:
     """(group key per record, info). info = {requested, mode (task | machine | field), basis, n_machines,
     machines_basis, n_groups, groups, rule}. session_keys (machine x day) is the task key of decoded John Deere logs."""
@@ -387,15 +412,20 @@ def resolve_groups(g, C: dict, P: dict, src_format: str | None, session_keys=Non
     n = len(g)
     has_ds = "_ds_key" in g
     ds = g[C["dataset"]].astype(str) if C.get("dataset") else None
-    # combines: the machine column, else the display serials of the SMS dataset names, else unknown
+    # combines: the machine column, else the sources of the dataset names (_machine holds them when they differ,
+    # yield_clean machines.from_dataset), else the display serials of the SMS dataset names, else unknown
     if C.get("machine"):
         machine_key = g["_machine"].astype(str).to_numpy()
         n_machines, mbasis = int(pd.Series(machine_key).nunique()), f"machine column {C['machine']!r}"
+    elif "_machine" in g and g["_machine"].nunique() > 1:
+        machine_key = g["_machine"].astype(str).to_numpy()
+        n_machines, mbasis = int(pd.Series(machine_key).nunique()), DATASET_MACHINES_BASIS
     elif ds is not None and dataset_serials(ds):
         ser = ds.map(lambda s: SERIAL_RE.search(s).group(1)).to_numpy()
         machine_key, n_machines, mbasis = ser, len(set(ser)), "display serial in the dataset names"
     else:
-        machine_key, n_machines, mbasis = None, None, "unknown (no machine column, no serial in the dataset names)"
+        machine_key, n_machines, mbasis = None, None, ("unknown (no machine column, no serial or differing sources "
+                                                       "in the dataset names)")
     # tasks: the dataset as named (never its sort key, which keeps only the start time), split by the Ops Center
     # record-id restarts (' #log' of the processing key) and by combine when a machine column exists
     fmt = (src_format or "").lower()

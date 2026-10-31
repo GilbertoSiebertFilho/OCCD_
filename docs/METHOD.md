@@ -158,8 +158,11 @@ percentile of the logged widths, so 16-23 m for 35-50 ft headers: the radius rea
 combine; `R["f8"]["local"]["radius_m"]`) and within 4 m of the same distance from the edge of the harvested area
 (`edge_tol_m`), at least 5 of them (`min_controls`); its ratio is its yield over the median yield of the controls.
 **The combine** (`yield_clean.combine_key`, `R["f8"]["local"]["combine_key"]`) is the machine column; without one, the
-display serial SMS writes at the end of Case IH / Ag Leader dataset names; else the Ops Center log (a record-id
-restart inside a dataset: one log per combine and task); else one combine for the whole file, with a note. The edge
+source SMS writes in parentheses at the end of the dataset names when every name has one and two or more differ (a
+display serial, or the maker of the monitor: '(CNH Industrial N.V.)', '(Trimble Navigation)'; `machines.from_dataset`,
+the same combines as the harmonisation and the sessions); else the display serial SMS writes at the end of Case IH /
+Ag Leader dataset names; else the Ops Center log (a record-id restart inside a dataset: one log per combine and task);
+else one combine for the whole file, with a note. The edge
 distance (`yield_clean.edge_distance`) is the distance to the edge of the harvested area: the processed positions on a
 2 m grid, grown by half a header + 2 m, holes filled. A band's dose-response is the median ratio of its records over
 the **placebo**, the median ratio of the no-overlap records themselves against their own controls (`R["f8"]["local"]`:
@@ -435,7 +438,8 @@ pairs" and no disagreement is claimed. A gated disagreement above 5 % is a warni
 calibration). A combine without a ticket is leveled with the reference's L (warning), and the level's ticket is then
 the implied field total (own tickets + integral x L_ref for the rest); a `scale_ticket_bu` given beside the tickets is
 compared with that total (warning above 1 %) and the set-aside warning of section 7 still applies. Tickets that name
-combines when the file has no machine column are refused with a warning (give the field total as `scale_ticket_bu`).
+combines when the file names none (no machine column, no differing sources in the dataset names) are refused with a
+warning (give the field total as `scale_ticket_bu`).
 With only a field total: relative harmonisation first, then L on the harmonised integral.
 
 Trial 19 pseudo-machines (every third pass x 1.08, with the design, pairs on the <= 2 % overlap records): f30 0.9105
@@ -618,7 +622,8 @@ Rules that make the numbers the ones typed in SMS:
   as 0 too (Trial 23 log: moisture 0.00-21.72), which keeps the same points.
 - **Grouping** (S3-S5). SMS applies a filter to the task it is added on, or with one pooled mean and SD to every task
   when it is added on the operation. `sms3sigma.group_by = "auto"` follows the team's practice: one pooled group when
-  one combine cut the field (machine column, else one display serial in the SMS dataset names: Trial 19, 20, 25),
+  one combine cut the field (machine column, else the sources of the SMS dataset names, else one display serial in
+  them: Trial 19, 20, 25),
   one group per task otherwise (Trial 22, 23, 28, 29, 30, 41, 50). A task is the dataset (with the Ops Center `#log`
   split when the record id restarts) for SMS / Ops Center exports and Case IH task logs, machine x day for decoded
   John Deere logs. `task`, `machine` and `field` force a grouping.

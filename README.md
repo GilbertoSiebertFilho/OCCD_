@@ -321,9 +321,10 @@ synthesis of the tests in Portuguese, `SINTESE_testes_ABC_pt.md`):
   design is given) is compared with the no-overlap records of that same population that belong to the same combine,
   lie on another pass, within max(15 m, 1.5 header widths) of it (`local_radius_m` is the 15 m; 16-23 m for 35-50 ft
   headers) and within 4 m of its distance from the edge of the harvested area (`edge_tol_m`), at least 5 of them
-  (`min_controls`). The combine is the machine column; without one, the display serial that SMS writes at the end of
-  Case IH / Ag Leader dataset names; else the Ops Center log (a record-id restart inside a task); else one combine for
-  the file (`R["f8"]["local"]["combine_key"]`). Per band, the median ratio of the band's records to their controls is
+  (`min_controls`). The combine is the machine column; without one, the source that SMS writes in parentheses at the
+  end of the dataset names when the names hold two or more (see *Several combines without a machine column* below);
+  else the display serial that SMS writes at the end of Case IH / Ag Leader dataset names; else the Ops Center log (a
+  record-id restart inside a task); else one combine for the file (`R["f8"]["local"]["combine_key"]`). Per band, the median ratio of the band's records to their controls is
   divided by the **placebo** (the same ratio of the no-overlap records themselves), and a band counts only with >= 30
   matched records. Why: the overlapped records lie 9-32 m from the edge and the no-overlap ones 60-160 m, and near
   the edge no-overlap records read 0.78-1.23 of no-overlap controls, so the field-wide band of v2.3 mixed the edge
@@ -498,6 +499,18 @@ add_symmetric_column true}`. Trial 19: Ms 14.5 % inferred from 2,419 records, on
 
 ### Several combines
 
+**Which records belong to which combine.** The machine column (`Machine`, `VIN` or `Combine`; a decoded file always
+has one). An SMS export has none, but SMS ends every dataset name with its source in parentheses: the display serial
+of a Case IH / Ag Leader display (`26/09/20-18:19:28 (219741)`) or the maker of the monitor or card the data came from
+(`A (CNH Industrial N.V.)`, `Harvest 2026 (Trimble Navigation)`, `TaskName 9/16/2026 (GreenStar 4 Monitor)`). When
+every dataset name ends with a source and two or more sources differ, each source is one combine for the
+harmonisation, the F8 local controls and the sessions (`machines.from_dataset`, default true; in the app the switch
+*Tell the combines apart by the dataset names* of the Combines tab, shown when the file holds two or more sources).
+One source (every task of a GreenStar 4 export, a single display serial) is one combine and the file is cleaned
+exactly as before. A 2026 wheat export of four monitors (two display serials, a CNH card and a Trimble display, 97,719
+points, no machine column): one display reads 2.5 % below the reference at 30 m (factor 1.025, CI 1.004-1.044, 571
+cells / 90 pass pairs) and at 50 m (1.026) and is harmonised; the CNH and Trimble data stay at 1 (CIs include 1).
+
 The reference is the combine with the most kept points (`machines.reference`, or an id; a reference whose records
 the cascade removed falls back to it with a warning). Every other combine is compared with it on 30 m and 50 m cells
 with >= 5 kept points of both **with <= 2 % of the footprint already cut** (`machines.pair_max_overlap`; same plot
@@ -519,7 +532,7 @@ the tickets is compared with it (warning above 1 %). The factors are applied to 
 as a factor below 1 on combine A. Means per combine (area, wet bu, mass per area, moisture, cleaned-map mean) are reported
 with the tests, with the share of each combine's kept records left out by the overlap rule. Settings: `machines =
 {harmonise true, reference "auto", totals_bu, min_pairs 30, min_pass_pairs 5, ci 0.95, min_factor 0.01, max_factor
-0.10, same_plot_only true, bootstrap_reps 1000, seed 2026, pair_max_overlap 0.02}`. On a seed-rate trial the gate is
+0.10, same_plot_only true, bootstrap_reps 1000, seed 2026, pair_max_overlap 0.02, from_dataset true}`. On a seed-rate trial the gate is
 underpowered without the design (adjacent passes carry different rates): give the design.
 
 ### Grower's weight as the real level
@@ -620,7 +633,9 @@ as the delivered Trial 29 cleaning did (10 %). The 8.7 % drop of the 0-2 % band 
   14.3 %; the decoder warns when a unit's median moisture is more than 2 points above the profile's standard.
 - **Exports:** the `.prj` is required; a `Time` without time of day falls back to dataset start + record id (sessions
   are then per dataset); an Ops Center export with several combines in one task and no machine column cannot be
-  harmonised (a warning says so).
+  harmonised (a warning says so). Combines told apart by the dataset names are as good as the names: two monitors
+  with the same source (two GreenStar 4 displays, two cards read as '(CNH Industrial N.V.)') stay one combine, and one
+  combine whose data came in twice under two sources counts as two.
 - **Field of interest:** the plan / fields decision is a heuristic (rate or plot column, typed headland, or >= 4
   polygons of similar size); a design of 2-3 plots without a rate column reads as fields (give the rate column or
   `aoi.id_col`), and a farm boundary file of >= 4 similar quarters without a name or rate column would read as a plan
@@ -638,7 +653,8 @@ as the delivered Trial 29 cleaning did (10 %). The 8.7 % drop of the 0-2 % band 
   edge). The local controls are thin: on the seven trials of the evaluation only 10-42 % of the dose population found
   controls, the scan stopped for lack of matched records in 5 of 7 trials and the 5 % floor set the threshold in 3 of
   7 (section *Evidence for v2.4*), so read `stop_kind` and the matched counts before trusting a threshold. Without a
-  machine column the combine comes from the SMS serial or the Ops Center log; an export with neither is one combine.
+  machine column the combine comes from the sources at the end of the SMS dataset names (two or more), the SMS serial
+  or the Ops Center log; an export with none of them is one combine.
   The overlap is measured on a 0.25 m raster, so single decisions near a threshold of 5-10 % still depend on the
   raster; the overlap over ground cut in another session is not flagged as low confidence; the harvest order of an SMS
   export is inferred (no time of day). The `Y_Offset` placement was confirmed on the geometry (P4) but not yet on

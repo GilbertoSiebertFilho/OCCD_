@@ -1170,15 +1170,20 @@ def units_aoi_distance_m(candidate: dict, units, aoi_union, opts, workdir: str) 
     return out
 
 
-def machine_summary(shp: str, machine_col: str | None, yield_col: str | None) -> list[dict]:
-    """[{machine, n, mean_yield}] of a point file, for the app's reference-combine and per-machine-totals widgets
-    (one row 'M1' when there is no machine column; mean_yield None without a yield column)."""
+def machine_summary(shp: str, machine_col: str | None, yield_col: str | None,
+                    dataset_col: str | None = None) -> list[dict]:
+    """[{machine, n, mean_yield}] of a point file, for the app's reference-combine and per-machine-totals widgets: by
+    the machine column; without one, by the sources at the end of the dataset names when they differ (as the cleaning
+    tells the combines apart, machines.from_dataset); else one row 'M1' (mean_yield None without a yield column)."""
     import pyogrio
-    cols = [c for c in (machine_col, yield_col) if c]
+    dataset_col = None if machine_col else dataset_col
+    cols = [c for c in dict.fromkeys((machine_col, yield_col, dataset_col)) if c]
     if not cols:
         return []
     df = pyogrio.read_dataframe(shp, columns=cols, read_geometry=False)
-    m = df[machine_col].astype(str) if machine_col else pd.Series(["M1"] * len(df))
+    dm = yield_clean.sms_mod.dataset_machines(df[dataset_col]) if dataset_col else None
+    m = (df[machine_col].astype(str) if machine_col else
+         pd.Series(dm[0] if dm is not None else ["M1"] * len(df)))
     y = pd.to_numeric(df[yield_col], errors="coerce") if yield_col else pd.Series(np.nan, index=df.index)
     g = pd.DataFrame({"m": m.values, "y": y.values}).groupby("m")
     return [{"machine": str(k), "n": int(len(d)), "mean_yield": (None if d.y.notna().sum() == 0 else float(d.y.mean()))}
