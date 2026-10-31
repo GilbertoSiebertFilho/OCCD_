@@ -379,8 +379,9 @@ def _machines_text(R) -> str:
         dec = (M.get("decision") or {}).get(m, "")
         parts.append(f"{_e(m)}: {_n(n)} points, {_n((M.get('n_kept') or {}).get(m))} kept, factor {fac:.4f}"
                      + (f" ({_e(dec)})" if dec else ""))
-    head = (f"{len(M.get('n_points') or {})} machines in column {_e(M.get('column'))}"
-            + (f", reference {_e(M['reference'])}" if M.get("reference") else ""))
+    head = (f"{len(M.get('n_points') or {})} machines by the {_e(M.get('basis') or ('column ' + str(M.get('column'))))}"
+            + (f", reference {_e(M['reference'])}" if M.get("reference") else "")
+            + (" (all neighbouring pairs solved together)" if M.get("estimate") == "network" else ""))
     s = head + ". " + "; ".join(parts) + "."
     if M.get("per_machine_totals"):
         s += " Per-machine totals were given: see the Combines section."
@@ -817,7 +818,7 @@ def _section_machines(story, R, num):
     M = R["machines"]
     story.append(Paragraph(f"{num}. Combines", H2))
     story.append(Paragraph(
-        f"{len(M.get('n_points') or {})} machines in column {_e(M.get('column'))}"
+        f"{len(M.get('n_points') or {})} machines by the {_e(M.get('basis') or ('column ' + str(M.get('column'))))}"
         + (f"; reference <b>{_e(M['reference'])}</b>" if M.get("reference") else "")
         + f". {_e(M.get('method') or M.get('rule') or '')} {_e(refs.cite('machines', notes=False))}.", BODY))
     means = M.get("means") or {}
@@ -836,19 +837,40 @@ def _section_machines(story, R, num):
     story.append(t)
     story.append(Paragraph("Field mean = mass per area over all processed readings of the machine; map mean = mean "
                            "of its kept points (bu/ac).", CAP))
+    pairs = [p for p in (M.get("pairs") or []) if p.get("cell_m") == 30]
+    if len(pairs) > 1:
+        story.append(Paragraph("Pairs of machines that harvested side by side (30 m cells with &ge; 5 kept points of "
+                               "both; ratio a / b = exp(mean log(a / b)); a pair is used when it has enough cells and "
+                               "pass pairs at 30 m and 50 m):", BODY))
+        rows = [["Machine a", "Machine b", "Cells", "Pass pairs", "a / b", "95 % CI", "Used"]]
+        for p_ in pairs:
+            ci = (f"{_n(p_.get('ci_lo'), 4)} - {_n(p_.get('ci_hi'), 4)}" if p_.get("ci_lo") is not None else "-")
+            rows.append([_e(p_.get("a")), _e(p_.get("b")), _n(p_.get("n_cells")), _n(p_.get("n_pass_pairs")),
+                         _n(p_.get("factor_a_over_b"), 4), ci, "yes" if p_.get("linked") else "no"])
+        w = [1.2, 1.2, 0.5, 0.65, 0.6, 1.2, 0.45]
+        scale = TEXT_W / (sum(w) * inch)
+        t = _table(rows, [x * inch * scale for x in w], small=True)
+        t.setStyle(TableStyle([("ALIGN", (2, 0), (-2, -1), "RIGHT")]))
+        story.append(t)
     tests = M.get("tests") or []
     if tests:
-        story.append(Paragraph("Paired cells against the reference (cells with &ge; 5 kept points of both machines; "
-                               "factor = exp(mean log(reference / machine)); CI by block bootstrap over pass pairs; "
-                               "the paired t-test p and the moisture difference are diagnostics):", BODY))
-        rows = [["Machine", "Cell m", "Cells", "Pass pairs", "Factor", "95 % CI", "p (t-test)", "Moisture diff."]]
+        story.append(Paragraph(("Factor of each machine against the reference, all used pairs solved together "
+                                "(weighted least squares on the log ratios, reference = 1)" if M.get("estimate") ==
+                                "network" else "Paired cells against the reference") +
+                               " (factor = what multiplies the machine to read like the reference; CI by block "
+                               "bootstrap over pass pairs; half 1 / half 2 = the factor in each half of the machine's "
+                               "contact cells, which must agree; whole field = map mean ratio, a diagnostic never "
+                               "applied):", BODY))
+        wf = M.get("whole_field_ratio") or {}
+        rows = [["Machine", "Cell m", "Cells", "Pass pairs", "Factor", "95 % CI", "Half 1", "Half 2", "Whole field"]]
         for t_ in tests:
             ci = (f"{_n(t_.get('ci_lo'), 4)} - {_n(t_.get('ci_hi'), 4)}" if t_.get("ci_lo") is not None else "-")
-            p = t_.get("p_ttest", t_.get("p"))
+            sp = t_.get("spatial") or {}
             rows.append([_e(t_.get("machine")), _n(t_.get("cell_m")), _n(t_.get("n_cells")),
-                         _n(t_.get("n_pass_pairs")), _n(t_.get("factor"), 4), ci,
-                         (f"{float(p):.3g}" if p is not None else "-"), _n(t_.get("moisture_diff"), 2)])
-        w = [1.0, 0.5, 0.5, 0.65, 0.65, 1.2, 0.7, 0.85]
+                         _n(t_.get("n_pass_pairs")), _n(t_.get("factor"), 4), ci, _n(sp.get("factor_half_1"), 4),
+                         _n(sp.get("factor_half_2"), 4),
+                         _n(wf.get(t_.get("machine")), 4) if t_.get("cell_m") == 30 else ""])
+        w = [1.0, 0.45, 0.5, 0.6, 0.6, 1.15, 0.6, 0.6, 0.7]
         scale = TEXT_W / (sum(w) * inch)
         t = _table(rows, [x * inch * scale for x in w], small=True)
         t.setStyle(TableStyle([("ALIGN", (1, 0), (-1, -1), "RIGHT")]))

@@ -2310,9 +2310,9 @@ with st.container(border=True):
                 max_factor = st.number_input("Max factor to apply (%)", 1.0, 50.0, 10.0, 1.0, key="max_factor",
                                              disabled=not harmonise,
                                              help="A proven difference larger than this is reported but not "
-                                                  "applied: ask the grower for per-machine weights, or give the "
-                                                  "grower's field weight (Corrections tab): when the weight confirms "
-                                                  "the factor, it is applied.")
+                                                  "applied, unless the grower's field weight (Corrections tab) "
+                                                  "confirms it: with the factor the monitor total closes with the "
+                                                  "weight, without it it does not.")
                 ticket_confirms = True
                 if ENGINE_TICKET_CONFIRMS:
                     ticket_confirms = st.toggle("Grower's weight may confirm a factor above the max", value=True,
@@ -2320,27 +2320,18 @@ with st.container(border=True):
                                                 help="Closure test: a proven factor above the max is applied when the "
                                                      "harmonised total closes with the grower's weight (within 1 %) "
                                                      "while the unharmonised total does not (> 3 %).")
+            # only the field's scale ticket exists (Corrections tab): no per-machine totals (the engine still reads
+            # machines.totals_bu from a settings file or the CLI)
             totals = {}
             if len(machines) >= 2:
-                st.caption("Per-machine totals (wet bushels from the scale, optional): one level factor per combine "
-                           "L_m = ticket_m / integral_m; the paired-cell factor is then reported as a validation.")
-                base = pd.DataFrame({"machine": machines,
-                                     "readings": [r["n"] for r in mrows],
-                                     "mean_yield": [r.get("mean_yield") for r in mrows],
-                                     "wet_bu": pd.Series([np.nan] * len(machines), dtype="float")})
-                # the editor cannot be set through the session state: a reset / start over remounts it (mt_nonce)
-                ed = st.data_editor(base, key=f"mt_{SK}_{ss.get('mt_nonce', 0)}", hide_index=True, num_rows="fixed",
-                                    disabled=["machine", "readings", "mean_yield"],
-                                    column_config={"machine": st.column_config.TextColumn("Combine"),
-                                                   "readings": st.column_config.NumberColumn("Readings", format="%d"),
-                                                   "mean_yield": st.column_config.NumberColumn("Mean yield (bu/ac)",
-                                                                                               format="%.1f"),
-                                                   "wet_bu": st.column_config.NumberColumn("Wet bushels (scale)",
-                                                                                           min_value=0.0,
-                                                                                           format="%.0f")})
-                for _, r in ed.iterrows():
-                    if pd.notna(r["wet_bu"]) and float(r["wet_bu"]) > 0:
-                        totals[str(r["machine"])] = float(r["wet_bu"])
+                st.dataframe(pd.DataFrame({"Combine": machines, "Readings": [r["n"] for r in mrows],
+                                           "Mean yield (bu/ac)": [r.get("mean_yield") for r in mrows]}),
+                             hide_index=True,
+                             column_config={"Mean yield (bu/ac)": st.column_config.NumberColumn(format="%.1f")})
+                st.caption("Every pair of combines that harvested side by side is compared on the same ground; the "
+                           "pairs are solved together, so a combine that never met the reference still gets a factor "
+                           "through its neighbours. A factor is applied only when it is proven at 30 m and 50 m and the "
+                           "two halves of the field agree. The whole-field means are shown as a diagnostic only.")
             elif machines:
                 st.caption(f"One combine in the data ({machines[0]}): nothing to harmonise.")
             elif not from_dataset:
@@ -2653,9 +2644,39 @@ def show_result(R: dict, where: str = "results"):
                                                "points": list(RM["n_points"].values()),
                                                "kept": [RM.get("n_kept", {}).get(m) for m in RM["n_points"]]}),
                                  hide_index=True)
+                pr = [p for p in (RM.get("pairs") or []) if p.get("cell_m") == 30]
+                if pr:
+                    st.markdown("**Pairs of combines that harvested side by side (30 m cells)**")
+                    st.dataframe(pd.DataFrame([{"combine a": p["a"], "combine b": p["b"], "cells": p["n_cells"],
+                                                "pass pairs": p["n_pass_pairs"], "a / b": p["factor_a_over_b"],
+                                                "CI low": p["ci_lo"], "CI high": p["ci_hi"],
+                                                "used": "yes" if p["linked"] else "no (too few pairs)"} for p in pr]),
+                                 hide_index=True,
+                                 column_config={c: st.column_config.NumberColumn(format="%.4f")
+                                                for c in ("a / b", "CI low", "CI high")})
                 if RM.get("tests"):
-                    st.markdown("**Paired cells against the reference (factor with CI)**")
-                    st.dataframe(pd.DataFrame(RM["tests"]), hide_index=True)
+                    st.markdown("**Factor of each combine against the reference "
+                                + ("(all pairs solved together)" if RM.get("estimate") == "network" else "(direct)")
+                                + "**")
+                    wf = RM.get("whole_field_ratio") or {}
+                    rows_ = []
+                    for t_ in RM["tests"]:
+                        sp = t_.get("spatial") or {}
+                        rows_.append({"combine": t_.get("machine"), "cell (m)": t_.get("cell_m"),
+                                      "factor": t_.get("factor"), "CI low": t_.get("ci_lo"), "CI high": t_.get("ci_hi"),
+                                      "cells": t_.get("n_cells"), "pass pairs": t_.get("n_pass_pairs"),
+                                      "through": ", ".join(map(str, t_.get("via") or [])),
+                                      "half 1": sp.get("factor_half_1"), "half 2": sp.get("factor_half_2"),
+                                      "whole-field ratio (diagnostic)": wf.get(t_.get("machine")),
+                                      "gate": t_.get("gate")})
+                    st.dataframe(pd.DataFrame(rows_), hide_index=True,
+                                 column_config={c: st.column_config.NumberColumn(format="%.4f")
+                                                for c in ("factor", "CI low", "CI high", "half 1", "half 2",
+                                                          "whole-field ratio (diagnostic)")})
+                    st.caption("Factor = what multiplies the combine's yield to read like the reference. Half 1 / half 2: "
+                               "the factor in each half of the combine's contact cells (one factor must fit both). The "
+                               "whole-field ratio compares the map means of the whole field: it mixes the machines with "
+                               "the ground each one cut, so it is never applied.")
                 dec_ = RM.get("decision") or {}
                 fa = RM.get("factor_applied") or {}
                 if dec_ or fa:

@@ -323,10 +323,13 @@ DEFAULT_SETTINGS = {
     # monitor total with the factor within ticket_close_tol of the ticket, without it more than 3 x that away)
     # from_dataset: without a machine column, the combines are told apart by the sources SMS writes in parentheses at
     # the end of the dataset names when they differ (sms3sigma.dataset_machines); false = one combine, as before
+    # network: the factor of a combine from every neighbouring pair of combines (weighted least squares), not only
+    # from its pair with the reference; spatial_check: one factor must fit both halves of the field (machines.py)
     "machines": {"harmonise": True, "reference": "auto", "totals_bu": None, "min_pairs": 30, "min_pass_pairs": 5,
                  "ci": 0.95, "min_factor": 0.01, "max_factor": 0.10, "same_plot_only": True, "bootstrap_reps": 1000,
                  "seed": 2026, "pair_max_overlap": machines_mod.PAIR_MAX_OVERLAP, "ticket_confirms": True,
-                 "ticket_close_tol": machines_mod.TICKET_CLOSE_TOL, "from_dataset": True},
+                 "ticket_close_tol": machines_mod.TICKET_CLOSE_TOL, "from_dataset": True, "network": True,
+                 "spatial_check": True},
     # cleaning method: "occd" (the cascade above), "sms3sigma" (the SMS 3-sigma sequence, settings in "sms3sigma")
     # or "both" (both on the same readings, then engine/clean/compare.py writes the comparison)
     "method": "occd",
@@ -644,8 +647,9 @@ def merge_settings(user=None) -> dict:
     if not isinstance(Ma["ticket_confirms"], bool):
         raise ValueError(f"machines.ticket_confirms must be true or false, not {Ma['ticket_confirms']!r}")
     Ma["ticket_close_tol"] = _num(Ma["ticket_close_tol"], "f", "machines.ticket_close_tol", 1e-9, 0.5)
-    if not isinstance(Ma["from_dataset"], bool):
-        raise ValueError(f"machines.from_dataset must be true or false, not {Ma['from_dataset']!r}")
+    for name in ("from_dataset", "network", "spatial_check"):
+        if not isinstance(Ma[name], bool):
+            raise ValueError(f"machines.{name} must be true or false, not {Ma[name]!r}")
     # ---- cleaning method
     m = str(S["method"] if S["method"] is not None else "occd").strip().lower()
     if m not in METHOD_ALIASES:
@@ -2411,6 +2415,7 @@ def clean(path, S, C, log=print, source=None):
                                         ywet.to_numpy(float) if ywet is not None else None)
              if (several or totals) else None)
     levels_m, validation, tests, ref, ticket_test = None, None, [], None, None
+    minfo = {}
     applied = {m: 1.0 for m in machs}
     if sms_run and several:
         decision = {m: "not harmonised (SMS 3-sigma method)" for m in machs}
@@ -2421,7 +2426,8 @@ def clean(path, S, C, log=print, source=None):
                   "one combine: nothing to harmonise")
     if harmonise:
         log("  machine harmonisation ...")
-        tests, applied, decision, ref = machines_mod.harmonise(g, alive, y.to_numpy(float), moi_arr, Mset, warnings)
+        tests, applied, decision, ref = machines_mod.harmonise(g, alive, y.to_numpy(float), moi_arr, Mset, warnings,
+                                                               info=minfo)
         method = machines_mod.method_text(Mset)
         if tk is not None and not totals and ticket_cmp and Mset.get("ticket_confirms", True):
             # the grower's weight as a closure test: a significant, consistent paired factor above max_factor is
@@ -2469,7 +2475,15 @@ def clean(path, S, C, log=print, source=None):
     if harm_on:
         harm = g._machine.map(applied).astype(float)
     if several or levels_m is not None:
+        mref = (means.get(ref) or {}).get("cleaned_map_mean") if (means and ref) else None
+        whole = {m: (mref / v["cleaned_map_mean"] if (mref and v.get("cleaned_map_mean")) else None)
+                 for m, v in (means or {}).items()}
         R["machines"] = {"column": C["machine"], "basis": machine_basis or "one combine", "reference": ref,
+                         "estimate": minfo.get("estimate"), "pairs": minfo.get("pairs") or [],
+                         "unlinked": minfo.get("unlinked") or [],
+                         "whole_field_ratio": whole, "whole_field_ratio_note": (
+                             "map mean of the reference / map mean of the combine over the whole field: a diagnostic, "
+                             "never applied (it mixes the machines with the ground each one cut)"),
                          "method": method, "rule": method,
                          "n_points": {m: means[m]["n"] for m in machs}, "n_kept": {m: means[m]["n_kept"] for m in machs},
                          "means": means, "tests": tests, "factor_applied": applied, "decision": decision,

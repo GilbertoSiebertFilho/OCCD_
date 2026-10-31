@@ -36,8 +36,10 @@ delay before F7 and F8 failed its pre-registered test and stays an option); the 
 5. **Sessions and the moisture basis are diagnosed, never corrected** (section 5): the run says on which basis the
    yield should be mapped and which column is the block.
 6. **Several combines are harmonised only when the difference is proven** (section 6); the factor goes to a new
-   column `Yld_Harm`, which is then the column to map in DIFM (DIFM has no machine term). Per-combine weighed totals
-   replace the paired estimate when they exist; the paired estimate then validates them.
+   column `Yld_Harm`, which is then the column to map in DIFM (DIFM has no machine term). Every pair of combines that
+   harvested side by side enters one solution (a combine gets its factor through its neighbours), and one factor must
+   fit both halves of the field. Per-combine weighed totals (settings file or CLI only) replace the paired estimate
+   when they exist; the paired estimate then validates them.
 7. **Level.** When the grower's weight (scale or cart total, in lb / kg / bu / t) exists, `L = weight / monitor
    total of the processed set` and the leveled columns `Yld_Level = mapped dry yield x factor x L` and `Yld_Lvl_Sy =
    Yld_Dry_Sy x factor x L` are written; the leveled column is then the one to map in DIFM. The total must belong to
@@ -411,21 +413,42 @@ after the AOI pre-step; `Yld_Dry_Sy` recommended. Trial 29: Ms 13.5 % (decoder, 
 The reference is the combine with the most kept points (`machines.reference` "auto", or an id; an id whose records
 the cascade removed falls back to "auto" with a warning). **The factor is applied to the non-reference combines**: a
 reference that reads 5 % high appears as a factor of about 1.05 on the other combine, never as 0.95 on the reference.
-Every other combine is compared with it on paired cells of 30 m and of 50 m that both harvested (>= 5 kept points of
+**Every pair of combines** is compared on paired cells of 30 m and of 50 m that both harvested (>= 5 kept points of
 each **with <= 2 % of the footprint already cut**, `machines.pair_max_overlap`, house rule from the 0-2 % band of the
 dose-response, which reads within 0.2 % of the no-overlap band on Trial 19; split by `Plot_Id` when a design exists
-and `same_plot_only`, so the pairs compare the same treatment): f = exp(mean(log(ref / m))) per cell size, CI by block
-bootstrap over pass pairs (1,000 reps, seed 2026). The overlap rule is what keeps two combines working side by side
+and `same_plot_only`, so the pairs compare the same treatment): ratio a / b = exp(mean(log(a / b))) per cell size, CI
+by block bootstrap over pass pairs (1,000 reps, seed 2026). A pair with >= 30 cells and >= 5 pass pairs at both sizes
+is **linked**. **The network** (`machines.network`, default true): with u_m = log(ref / m) the log factor of combine
+m (u_ref = 0), every linked pair (a, b) says u_b - u_a = mean log(a / b), weighted by 1 / its bootstrap variance; the
+weighted least-squares solution gives every combine its factor at once, with a CI from re-solving on the bootstrap
+draws of every pair. A combine that never met the reference is linked through its neighbours (the "nearest combine"
+of Maldaner et al. 2016, every link used at once); a combine with no chain of linked pairs to the reference gets no
+factor. With two combines (or links to the reference only) the solution is the direct comparison, as before. On three
+pseudo-combines (random pass splits of four single-combine data sets, one pseudo-combine x 1.05) the network put a
+false factor on the unchanged pseudo-combine in 1 of 40 splits (2 of 40 against the reference only) and applied the
+true one in 21 of 40 (18 of 40), error 1.35 % (1.56 %). On a 2026 wheat export of four monitors all six pairs are
+linked; the combine that reads low gets 1.027 (CI 1.010-1.043, 1,154 cells through its three neighbours) against
+1.025 (CI 1.004-1.044, 571 cells) from the reference alone. The overlap rule is what keeps two combines working side by side
 from getting a factor they do not deserve: the pass that follows another carries the sub-threshold overlap and its
 kept records read 2-3 % low, so pairing every kept record measures the overlap, not the machine (Trial 19 with alternate
 passes labelled A / B and no yield change: 1.029 with CI 1.008-1.049, "applied", on every kept record; 1.009, CI
 includes 1, with the rule; 20 random pass splits: 1 applied either way). The price is fewer pairs (Trial 19
 pseudo-machines: 40 cells / 8 pass pairs instead of 200 / 28) and a noisier estimate. The 30 m factor is **applied**
 (`Yld_Harm` = y x f on that combine, 1 elsewhere) only when >= 30 cells and >= 5 pass pairs exist at both sizes, both
-95 % CIs exclude 1, the two factors agree within 2 % and 1 % < |f - 1| <= 10 %. Above 10 % nothing is applied and
-the run asks for per-machine weights. The paired t-test p (the v1 test) and the moisture difference on the same pairs
+95 % CIs exclude 1, the two factors agree within 2 % and 1 % < |f - 1| <= 10 %, and **one factor fits the whole
+field** (`machines.spatial_check`, default true): the combine's contact cells, each an estimate of its factor, are
+split in two halves along the main axis of their positions; the halves must agree within 5 % or not differ
+significantly (bootstrap over the pass pairs of each half; each half >= 10 cells and >= 3 pass pairs, else not
+checked). This is the case Maldaner et al. (2016) found their factors fail on. On pseudo-combines with a constant
+factor the halves differ by 2.1 % (median; 90th percentile 7.2 %) and 7 % of the splits are flagged. Above 10 %
+nothing is applied unless the field's scale ticket confirms the factor (the closure test of section 7). The paired t-test p (the v1 test) and the moisture difference on the same pairs
 are diagnostics. Means per combine (points, kept, area, wet bu, mass per area, moisture, cleaned-map mean) are
-reported. Sources: Maldaner et al. 2016 (one factor per combine against a reference combine); Chiocco & Wuestefeld
+reported, with the whole-field ratio of the map means as a diagnostic that is never applied: it mixes the machines
+with the ground each one cut (pseudo-combines that each cut one block of a field: off by up to 8-11 %). Sources:
+Maldaner et al. 2016 (reference = the combine with the largest area; one factor per combine, the nearest combine
+first; their track-by-track and point-by-point factors use one pair of closest paths, which put the factor off by more
+than 5 % in 43 % of the path pairs of four 2026 data sets, and they were judged by the SD / CV and variograms, not by
+a weight); Chiocco & Wuestefeld
 2019 (gain searched within +/- 10 %, the cap); Gauci et al. 2023 (calibrated monitors within 1.7 % of the weigh
 wagon: a step under the 1 % floor is noise); the gates are a house method.
 

@@ -512,16 +512,22 @@ points, no machine column): one display reads 2.5 % below the reference at 30 m 
 cells / 90 pass pairs) and at 50 m (1.026) and is harmonised; the CNH and Trimble data stay at 1 (CIs include 1).
 
 The reference is the combine with the most kept points (`machines.reference`, or an id; a reference whose records
-the cascade removed falls back to it with a warning). Every other combine is compared with it on 30 m and 50 m cells
+the cascade removed falls back to it with a warning). **Every pair of combines** is compared on 30 m and 50 m cells
 with >= 5 kept points of both **with <= 2 % of the footprint already cut** (`machines.pair_max_overlap`; same plot
-when a design exists): f = exp(mean(log(ref / m))), CI by block bootstrap over pass pairs (1,000 reps, seed 2026).
+when a design exists): ratio = exp(mean(log(a / b))), CI by block bootstrap over pass pairs (1,000 reps, seed 2026).
+The pairs with >= 30 cells and >= 5 pass pairs at both sizes are solved together (`machines.network`): weighted least
+squares on the log ratios with the reference at 1, so a combine that never met the reference gets its factor through
+its neighbours, and a combine with no chain of neighbours to the reference gets none. With two combines this is the
+direct comparison.
 The overlap rule matters: the pass that follows another carries the overlap below the F8 threshold and its kept
 records read 2-3 % low, so pairing every kept record of two combines working side by side measures the overlap, not
 the machines (Trial 19 with alternate passes labelled A / B and no yield change: factor 1.029 "applied" with every
 record, 1.009 and not applied with the rule). The 30 m factor is **applied** (column `Yld_Harm`) only when there are
 >= 30 cells and >= 5 pass pairs at both sizes, both 95 % CIs exclude 1, the two factors agree within 2 % and 1 % <
-|f - 1| <= 10 %; above 10 % nothing is applied and the run asks for per-machine weights. The paired t-test p and the
-moisture difference on the same pairs are diagnostics. With **per-combine weighed totals** (`machines.totals_bu`, CLI
+|f - 1| <= 10 %, and one factor fits the whole field (`machines.spatial_check`: the two halves of the combine's
+contact cells agree within 5 % or do not differ significantly); above 10 % nothing is applied unless the field's
+scale ticket confirms the factor. The paired t-test p, the moisture difference on the same pairs and the whole-field
+ratio of the map means (it mixes the machines with the ground each one cut) are diagnostics. With **per-combine weighed totals** (`machines.totals_bu`, CLI
 `--machine-total VIN=BU`; applied whenever they are given, with or without the relative harmonisation and also for a
 single combine), L_m = ticket_m / wet integral_m, `Yld_Level` = y x L_m and `Yld_Harm` = y x L_m / L_ref; the paired
 estimate is then a validation (agreement = (L_m / L_ref) / f_paired - 1) **only where it passes its own pair gate**,
@@ -532,7 +538,9 @@ the tickets is compared with it (warning above 1 %). The factors are applied to 
 as a factor below 1 on combine A. Means per combine (area, wet bu, mass per area, moisture, cleaned-map mean) are reported
 with the tests, with the share of each combine's kept records left out by the overlap rule. Settings: `machines =
 {harmonise true, reference "auto", totals_bu, min_pairs 30, min_pass_pairs 5, ci 0.95, min_factor 0.01, max_factor
-0.10, same_plot_only true, bootstrap_reps 1000, seed 2026, pair_max_overlap 0.02, from_dataset true}`. On a seed-rate trial the gate is
+0.10, same_plot_only true, bootstrap_reps 1000, seed 2026, pair_max_overlap 0.02, from_dataset true, network true,
+spatial_check true}`. The app takes the grower's weight of the whole field only (Corrections tab); per-combine totals
+can still be given in a settings file or on the CLI. On a seed-rate trial the gate is
 underpowered without the design (adjacent passes carry different rates): give the design.
 
 ### Grower's weight as the real level

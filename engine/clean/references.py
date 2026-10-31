@@ -217,7 +217,7 @@ SOURCES = {
     ],
     "machines": [
         {"key": "Maldaner 2016", "supports": "method",
-         "note": "reference = combine with largest area; others x one ratio (means, adjacent passes or nearest point pairs)"},
+         "note": "reference = combine with largest area; others x one ratio from all points, the one pair of closest paths or the point pairs on it; nearest combine corrected first; judged by SD / CV and variograms (no weight); proceedings, not refereed"},
         {"key": "Chiocco 2019", "supports": "range",
          "note": "multi-harvester gain searched within +/- 10 % on nearest points of adjacent paths: OCCD's 10 % cap"},
         {"key": "Gauci 2023", "supports": "range",
@@ -253,7 +253,7 @@ HOUSE_RULES = {
     "F11": "+/- 10 records window and a minimum of 6 surviving records in it: house values (the record included; with fewer the record is kept untested)",
     "F5b": "10-record minimum re-applied to runs broken by any removal: house extension (Ping & Dobermann 2005 drop < 12-point harvest segments last; Marchant et al. 2019 trim N s at filter gaps)",
     "sessions": "sessions, the Ms inference, the shrink test and the discontinuity check: house method, diagnostic only (session = machine x local calendar day, decoder offset else round(longitude / 15) h; Ms inferred from >= 200 records with dry/wet < 0.999; one-sided shrink when dry == wet on >= 95 % of the records below Ms; 30 m cells, >= 5 kept points of each session, <= 2 % overlap first, >= 10 cells, >= 3 pass pairs; triggers > 2 moisture points or > 20 % below Ms; crop-table Ms other than corn 15.5 / soybean 13 %)",
-    "machines": "pairing, bootstrap and gates: house method (combines = the machine column, else the sources in parentheses at the end of the dataset names when two or more differ; reference = the combine with most kept points, Maldaner et al. 2016 use the largest area; pairs on records <= 2 % overlapped in 30 / 50 m cells with >= 5 points of each machine; >= 30 cells and >= 5 pass pairs; 1,000-rep pass-pair bootstrap with both 95 % CIs excluding 1; 30 / 50 m factors within 2 %; 1 % floor; above 10 % nothing applied and per-machine weights requested; ticket closure 1 %, 3 x; 5 % ticket-vs-paired warning)",
+    "machines": "pairing, bootstrap and gates: house method (combines = the machine column, else the sources in parentheses at the end of the dataset names when two or more differ; every pair of combines with >= 30 cells and >= 5 pass pairs solved together by weighted least squares on the log ratios; one factor must fit both halves of the field (within 5 % or not significant); reference = the combine with most kept points, Maldaner et al. 2016 use the largest area; pairs on records <= 2 % overlapped in 30 / 50 m cells with >= 5 points of each machine; >= 30 cells and >= 5 pass pairs; 1,000-rep pass-pair bootstrap with both 95 % CIs excluding 1; 30 / 50 m factors within 2 %; 1 % floor; above 10 % nothing applied and per-machine weights requested; ticket closure 1 %, 3 x; 5 % ticket-vs-paired warning)",
     "level": "L over every processed record, the 10 % 'check the ticket coverage' edge, the 5 % set-aside and 1 % ticket-tolerance warnings and the crop-table test weights: house rules (Clarke et al. 2024 rescale the cleaned-map mean; the 1 % and 3 % bands follow Luck & Fulton 2014)",
 }
 # the v2.3 texts of the steps v2.4 changed: a run with the v2.3 overlap model (yield_clean.LEGACY_V23) cites these
