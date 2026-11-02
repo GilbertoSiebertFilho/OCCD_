@@ -5,6 +5,7 @@
                          [--year Y] [--allow-mixed] [--settings s.json] [--boundary FILE]
                          [--scale-ticket VALUE --ticket-unit lb|kg|bu|t --ticket-basis wet|dry --ticket-moisture PCT]
                          [--scale-ticket-bu BU] [--aoi FILE] [--reference-machine ID] [--machine-total VIN=BU ...]
+                         [--factor-method auto|cells|track|point|machine]
                          [--standard-moisture PCT] [--shrink auto|one_sided|symmetric] [--candidate N] [--list]
 
     from engine import run
@@ -1278,6 +1279,10 @@ def main(argv=None) -> int:
                     "harmonisation (default auto = the one with the most kept points)")
     ap.add_argument("--machine-total", action="append", default=None, metavar="VIN=BU",
                     help="wet bushels harvested by one combine (repeatable): per-machine level factors")
+    ap.add_argument("--factor-method", choices=["auto", "cells", "track", "point", "machine"], default=None,
+                    help="several combines: how the combine factor is computed (machines.method; auto = the paired "
+                         "cells where the combines met on interleaved or mixed passes, no factor where they harvested "
+                         "in blocks; the harvest layout and all four methods are reported whatever the choice)")
     ap.add_argument("--standard-moisture", type=float, default=None, help="standard moisture %% of the cleaning's "
                     "moisture basis (default: decoder > inferred from the export > crop table); also the decoder's "
                     "unless --std-moisture is given")
@@ -1447,6 +1452,8 @@ def _cli(a) -> int:
         settings.setdefault("moisture", {})["shrink"] = a.shrink
     if a.reference_machine:
         settings.setdefault("machines", {})["reference"] = a.reference_machine
+    if a.factor_method:
+        settings.setdefault("machines", {})["method"] = a.factor_method
     if a.machine_total:
         totals = {}
         for item in a.machine_total:

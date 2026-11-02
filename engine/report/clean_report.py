@@ -14,8 +14,10 @@ DIFM, every warning (the decoder's included) and the checks worth making (R['adv
 support it, removed, remaining; switched-off filters greyed); (3) "Field of interest" (R['aoi']: plan file,
 polygons / plots, area, points outside the buffer, output clip); (4) "Harvest sessions" (R['sessions']: one row per
 machine x day, the field mean against the cleaned-map mean, the discontinuity check between consecutive sessions, the
-recommendation and fig_clean_sessions.png); (5) "Combines" (R['machines']: per-machine means, paired-cell factors with
-their bootstrap CI and decision, per-machine totals and their validation); (6) "Level: the grower's weight" (R['level']: the ticket in its
+recommendation and fig_clean_sessions.png); (5) "Combines" (R['machines']: per-machine means, the harvest layout of
+every pair of combines (R['machines']['layout']), the four methods with their traffic light and the one used
+(R['machines']['methods']), the factors of the method used with their bootstrap CI and decision, per-machine totals and
+their validation); (6) "Level: the grower's weight" (R['level']: the ticket in its
 unit, its conversion to bushels, L, the closure with the monitor total, the combines' ticket closure test and the
 column mapped for DIFM); (7) the settings and the column mapping; (8) the figures; (9) "References": the full
 citation (authors, year, title, venue, DOI) of every work cited by the steps that ran, from engine/clean/references.py.
@@ -367,6 +369,17 @@ def _lag_text(R) -> str:
     return f"{scan}; <b>no shift applied</b> ({rule})."
 
 
+LAYOUT_TEXT = {"interleaved": "interleaved passes", "mixed": "mixed", "blocks": "blocks", "no_contact": "no contact"}
+METHOD_TEXT = {"auto": "auto", "cells": "paired cells", "machine": "machine x machine", "track": "track x track",
+               "point": "point x point"}
+GATE_TEXT = {"applied": "passes the gates", "ci_includes_1": "CI includes 1", "too_few_pairs": "too few pairs",
+             "no_link": "no link", "above_max_factor": "above the max", "above_max_factor_unconfirmed":
+             "above the max, not proven", "below_min_factor": "below 1 %", "sizes_disagree": "30 m / 50 m disagree",
+             "spatially_inconsistent": "differs over the field", "layout": "not used (layout)"}
+LIGHT_BG = {"green": colors.HexColor("#D1FAE5"), "yellow": colors.HexColor("#FEF3C7"),
+            "red": colors.HexColor("#FEE2E2")}
+
+
 def _machines_text(R) -> str:
     M = R.get("machines")
     if not M:
@@ -379,8 +392,10 @@ def _machines_text(R) -> str:
         dec = (M.get("decision") or {}).get(m, "")
         parts.append(f"{_e(m)}: {_n(n)} points, {_n((M.get('n_kept') or {}).get(m))} kept, factor {fac:.4f}"
                      + (f" ({_e(dec)})" if dec else ""))
+    req = M.get("method_requested")
     head = (f"{len(M.get('n_points') or {})} machines by the {_e(M.get('basis') or ('column ' + str(M.get('column'))))}"
             + (f", reference {_e(M['reference'])}" if M.get("reference") else "")
+            + (f", method {_e(METHOD_TEXT.get(req, req))}" if req else "")
             + (" (all neighbouring pairs solved together)" if M.get("estimate") == "network" else ""))
     s = head + ". " + "; ".join(parts) + "."
     if M.get("per_machine_totals"):
@@ -837,6 +852,46 @@ def _section_machines(story, R, num):
     story.append(t)
     story.append(Paragraph("Field mean = mass per area over all processed readings of the machine; map mean = mean "
                            "of its kept points (bu/ac).", CAP))
+    lay = M.get("layout") or []
+    if lay:
+        story.append(Paragraph("<b>How the combines shared the field</b> (adjacency = the share of each combine's passes "
+                               "with &ge; 10 kept points within 1.5 header widths of the other combine, mean of the "
+                               "two; &ge; 50 % interleaved passes, 10-50 % mixed, &lt; 10 % blocks; mixing = the share "
+                               "of the 100 m squares both cut):", BODY))
+        rows = [["Machine a", "Machine b", "Adjacency %", "Mixing %", "Harvest layout"]]
+        for r in lay:
+            rows.append([_e(r.get("a")), _e(r.get("b")), _n(100 * float(r.get("adjacency") or 0), 0),
+                         _n(100 * float(r.get("mixing") or 0), 0), _e(LAYOUT_TEXT.get(r.get("layout"), r.get("layout")))])
+        w = [1.5, 1.5, 0.8, 0.7, 1.3]
+        scale = TEXT_W / (sum(w) * inch)
+        t = _table(rows, [x * inch * scale for x in w], small=True)
+        t.setStyle(TableStyle([("ALIGN", (2, 0), (3, -1), "RIGHT")]))
+        story.append(t)
+        story.append(Spacer(1, 6))
+    meths = M.get("methods") or []
+    if meths:
+        req = M.get("method_requested") or "auto"
+        story.append(Paragraph(f"<b>The four methods</b> (chosen: {_e(METHOD_TEXT.get(req, req))}; after "
+                               f"{_e(M.get('after') or 'the cleaning')}). Light = how far the method can be trusted "
+                               "for the harvest layout (pseudo-combine tests: green reliable, yellow with care, red not "
+                               "reliable); result = what the gates say for that method; used = the method of the "
+                               "factor applied:", BODY))
+        rows = [["Machine", "Method", "Light", "Factor", "95 % CI", "Based on", "Result", "Used"]]
+        bg = []
+        for k, r in enumerate(meths):
+            ci = (f"{_n(r.get('ci_lo'), 4)} - {_n(r.get('ci_hi'), 4)}" if r.get("ci_lo") is not None else "-")
+            based = (f"{_n(r.get('n_units'))} {_e(r.get('unit') or '')}" if r.get("n_units") is not None else "-")
+            rows.append([_e(r.get("machine")), _e(METHOD_TEXT.get(r.get("method"), r.get("label"))),
+                         _e(r.get("light") or "-"), _n(r.get("factor"), 4), ci, based,
+                         _e(GATE_TEXT.get(r.get("gate"), r.get("gate") or "-")), "yes" if r.get("used") else ""])
+            if r.get("light") in LIGHT_BG:
+                bg.append(("BACKGROUND", (2, k + 1), (2, k + 1), LIGHT_BG[r["light"]]))
+        w = [1.05, 1.05, 0.5, 0.55, 1.0, 1.05, 1.1, 0.4]
+        scale = TEXT_W / (sum(w) * inch)
+        t = _table(rows, [x * inch * scale for x in w], small=True)
+        t.setStyle(TableStyle([("ALIGN", (3, 0), (3, -1), "RIGHT")] + bg))
+        story.append(t)
+        story.append(Spacer(1, 6))
     pairs = [p for p in (M.get("pairs") or []) if p.get("cell_m") == 30]
     if len(pairs) > 1:
         story.append(Paragraph("Pairs of machines that harvested side by side (30 m cells with &ge; 5 kept points of "
@@ -862,14 +917,17 @@ def _section_machines(story, R, num):
                                "contact cells, which must agree; whole field = map mean ratio, a diagnostic never "
                                "applied):", BODY))
         wf = M.get("whole_field_ratio") or {}
-        rows = [["Machine", "Cell m", "Cells", "Pass pairs", "Factor", "95 % CI", "Half 1", "Half 2", "Whole field"]]
+        rows = [["Machine", "Method", "Units", "Pass pairs", "Factor", "95 % CI", "Half 1", "Half 2", "Whole field"]]
         for t_ in tests:
             ci = (f"{_n(t_.get('ci_lo'), 4)} - {_n(t_.get('ci_hi'), 4)}" if t_.get("ci_lo") is not None else "-")
             sp = t_.get("spatial") or {}
-            rows.append([_e(t_.get("machine")), _n(t_.get("cell_m")), _n(t_.get("n_cells")),
+            mt = t_.get("method", "cells")
+            rows.append([_e(t_.get("machine")),
+                         (f"cells {_n(t_.get('cell_m'))} m" if mt == "cells" else _e(METHOD_TEXT.get(mt, mt))),
+                         _n(t_.get("n_cells") if mt == "cells" else t_.get("n_units")),
                          _n(t_.get("n_pass_pairs")), _n(t_.get("factor"), 4), ci, _n(sp.get("factor_half_1"), 4),
                          _n(sp.get("factor_half_2"), 4),
-                         _n(wf.get(t_.get("machine")), 4) if t_.get("cell_m") == 30 else ""])
+                         _n(wf.get(t_.get("machine")), 4) if t_.get("primary", t_.get("cell_m") == 30) else ""])
         w = [1.0, 0.45, 0.5, 0.6, 0.6, 1.15, 0.6, 0.6, 0.7]
         scale = TEXT_W / (sum(w) * inch)
         t = _table(rows, [x * inch * scale for x in w], small=True)

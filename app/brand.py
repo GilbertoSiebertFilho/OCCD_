@@ -8,6 +8,8 @@ the small CSS of the page, the map colours).
     st.set_page_config(page_title=brand.NAME, page_icon=brand.page_icon(), layout="wide")
     brand.inject()                    # once per run, right after set_page_config
     st.logo(brand.LOGO_H, icon_image=brand.LOGO_SHIELD, size="large")
+    brand.step_header(1, "Input", "Upload the monitor files")      # the numbered heading of a step card
+    brand.brand_block()               # name, version and tagline of the title bar
 
 Palette (assets/brand/BRAND.md, the Olds College site stylesheet): navy is the primary colour (buttons, headings,
 tree group titles, active states), light blue the accent (icons, outlines, selected states), green = kept / success,
@@ -17,12 +19,16 @@ for fills, icons, outlines and large labels only, and the *_TEXT shades when a w
 
 The theme itself is .streamlit/config.toml (and the same flags in the "occd" launch configuration, because the config
 file is only read when the app is started from the project folder: the sidebar tint is [theme.sidebar] there);
-inject() adds the few things a theme cannot set, as light-dark() pairs that follow the rendered theme: the heading and
-metric colours, the metric label weight, the captions (Streamlit draws them at 60 % opacity, 4.0:1 on white and 2.4:1
-for the links inside them; here they are MUTED at full opacity, 7.6:1, and their links LIGHT_BLUE_TEXT, 4.9:1), the
-smaller headings of the blocks nested in a step (the field of interest in step 1, the filter boxes of step 3, hooked
-by the containers' keys) and the .occd-rule class of rule(). No external font or CDN: the app runs offline on a field
-laptop.
+inject() adds what a theme cannot set, as light-dark() pairs that follow the rendered theme (v2.6 look): a navy title
+bar (the app_header container: white logo, name, version pill, Start over), the four steps as white cards on a light
+canvas with a navy top edge and a numbered badge (step_header(); the occd_step_1..4 containers), the controls that
+decide a run in tinted, edged panels (method_panel: crop and cleaning method; factor_method_box; the column mapping
+expander colmap), the tabs as pills with the selected one navy, primary buttons navy with a lift on hover, the main
+action (run_go) larger and the DIFM download green, metrics as small cards, the captions at full opacity (Streamlit
+draws them at 60 %, 4.0:1 on white; here MUTED, 7.6:1, links LIGHT_BLUE_TEXT, 4.9:1), the smaller headings of the
+blocks nested in a step (field of interest, filter boxes) and the .occd-rule class of rule(). Only stable hooks are
+used (data-testid, role / aria attributes, the st-key-* classes of keyed elements). No external font or CDN: the
+app runs offline on a field laptop.
 """
 from __future__ import annotations
 
@@ -38,7 +44,7 @@ NAME = "OCCD"
 LONG_NAME = "OCCD — Olds College Cleaning Data"
 TAGLINE = "Olds College Cleaning Data · yield data cleaning for the DIFM platform"
 ORG = "Olds College Smart Farm (OFPE)"
-VERSION = "2.4.1"
+VERSION = "2.6.0"
 
 # ---- palette (hex strings; BRAND.md)
 NAVY = "#00358E"            # primary: buttons, headings, tree group titles, active states, lines and fits in figures
@@ -95,33 +101,188 @@ def page_icon():
 
 def _css() -> str:
     """The style block: stable hooks only (data-testid attributes, the .stApp root, the st-key-* classes of the keyed
-    containers, our own .occd-rule class); no emotion class names. Every colour is a CSS light-dark() pair resolved
-    by the browser against the color-scheme that Streamlit sets on .stApp for the rendered theme, so the block is
-    right on the very first run too (dark mode is not a target, but if the user switches to it the headings turn
-    light blue instead of vanishing). Python-side detection through st.context.theme.type is not used: on the first
-    run after a connection it reports the OS preference, not the configured theme, and a light page would get the
-    dark variant until the next rerun. The caption rules undo Streamlit's 60 % opacity (WCAG AA for the most used
-    secondary text of the page); the nested-heading rules hook the keys of the containers app.py gives the field-of-
-    interest block (aoi_block) and the filter boxes (filter_box_<F>)."""
+    containers and widgets, our own .occd-* classes); no emotion class names. Every colour is a CSS light-dark() pair
+    resolved by the browser against the color-scheme that Streamlit sets on .stApp for the rendered theme, so the
+    block is right on the very first run too (dark mode is not a target, but stays legible). Python-side detection
+    through st.context.theme.type is not used: on the first run after a connection it reports the OS preference, not
+    the configured theme.
+
+    The look (v2.6): a navy title bar (app_header), the four steps as white cards on a light canvas with a navy top
+    edge and a numbered badge (step_header; keys occd_step_1..4), the controls that decide the run in tinted panels
+    (method_panel: crop and cleaning method; factor_method_box; the column mapping expander colmap), the tabs as
+    pills (the selected one navy), primary buttons navy with a lift on hover, the main action (run_go) larger and the
+    DIFM download green, metrics as small cards. The captions keep full opacity (WCAG AA: 7.6:1 on white)."""
+    navy, blue, txt = NAVY, LIGHT_BLUE, TEXT
     heading = f"light-dark({NAVY}, {LIGHT_BLUE})"
-    rule = f"light-dark({RULE}, rgba(255,255,255,0.18))"
-    muted = f"light-dark({MUTED}, rgba(255,255,255,0.65))"
+    rule = f"light-dark({RULE}, rgba(255,255,255,0.14))"
+    muted = f"light-dark({MUTED}, rgba(255,255,255,0.68))"
     link = f"light-dark({LIGHT_BLUE_TEXT}, {LIGHT_BLUE})"
+    canvas = "light-dark(#F3F6FA, #0E1117)"
+    card = "light-dark(#FFFFFF, #161B22)"
+    tint = "light-dark(#EAF2FC, rgba(0,156,222,0.12))"
+    tint2 = "light-dark(#F5F9FE, rgba(255,255,255,0.03))"
+    edge = "light-dark(#C9DCF3, rgba(0,156,222,0.35))"
+    pill_txt = f"light-dark({NAVY}, #CFE3FA)"
+    shadow = "0 1px 2px rgba(16,24,40,0.05), 0 6px 22px rgba(0,53,142,0.07)"
     return f"""<style>
-/* OCCD brand (app/brand.py) */
+/* ---- OCCD brand (app/brand.py) ---- */
+.stApp [data-testid="stMain"], .stApp [data-testid="stHeader"] {{ background: {canvas}; }}
 .stApp h1, .stApp h2, .stApp h3 {{ color: {heading}; }}
-[data-testid="stSidebar"] [data-testid="stBaseButton-tertiary"] {{ color: {heading}; }}
-[data-testid="stMetricLabel"], [data-testid="stMetricLabel"] p {{ font-weight: 600; }}
-[data-testid="stMetricValue"] {{ color: {heading}; }}
+.stApp [data-testid="stMainBlockContainer"] {{ padding-top: 4.4rem; }}
 /* captions: full opacity, muted text (7.6:1 on white, 7.0:1 on the sidebar), AA links */
 div[data-testid="stCaptionContainer"] {{ opacity: 1; }}
 div[data-testid="stCaptionContainer"], div[data-testid="stCaptionContainer"] p,
 div[data-testid="stCaptionContainer"] li {{ color: {muted}; }}
 div[data-testid="stCaptionContainer"] a {{ color: {link}; }}
-/* a block nested in a step (field of interest, one filter): a smaller heading than the step's own */
-.stApp .st-key-aoi_block h3, .stApp [class*="st-key-filter_box_"] h3 {{ font-size: 1.25rem; padding: 0.25rem 0 0.5rem; }}
+
+/* ---- title bar */
+.stApp .st-key-app_header {{
+  background: linear-gradient(115deg, #00266B 0%, {navy} 42%, #0060C0 82%, {blue} 125%);
+  border-radius: 16px; padding: 1.0rem 1.5rem !important; box-shadow: 0 10px 28px rgba(0,53,142,0.28);
+  margin-bottom: 0.4rem;
+}}
+.occd-brand {{ display: flex; flex-direction: column; gap: 0.15rem; }}
+.occd-brand-name {{ font-size: 2.05rem; font-weight: 800; letter-spacing: 0.03em; color: #FFFFFF; line-height: 1.1;
+  display: flex; align-items: center; gap: 0.6rem; }}
+.occd-brand-tag {{ font-size: 0.98rem; color: rgba(255,255,255,0.88); }}
+.occd-pill {{ font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; padding: 0.18rem 0.55rem;
+  border-radius: 999px; background: rgba(255,255,255,0.16); border: 1px solid rgba(255,255,255,0.45); color: #FFFFFF; }}
+.stApp .st-key-app_header [data-testid="stCaptionContainer"],
+.stApp .st-key-app_header [data-testid="stCaptionContainer"] p {{ color: rgba(255,255,255,0.88) !important; }}
+.stApp .st-key-app_header [data-testid="stBaseButton-secondary"] {{
+  background: rgba(255,255,255,0.10); color: #FFFFFF; border: 1px solid rgba(255,255,255,0.55); }}
+.stApp .st-key-app_header [data-testid="stBaseButton-secondary"]:hover {{
+  background: rgba(255,255,255,0.22); border-color: #FFFFFF; color: #FFFFFF; }}
+.stApp .st-key-app_header [data-testid="stBaseButton-secondary"] p,
+.stApp .st-key-app_header [data-testid="stBaseButton-secondary"] [data-testid="stIconMaterial"] {{ color: #FFFFFF; }}
+
+/* ---- the steps: cards with a navy top edge and a numbered badge */
+.stApp [class*="st-key-occd_step_"] {{
+  background: {card}; border: 1px solid {rule} !important; border-top: 4px solid {navy} !important;
+  border-radius: 14px !important; box-shadow: {shadow}; padding: 1.15rem 1.45rem 1.4rem !important;
+}}
+.occd-step {{ display: flex; align-items: center; gap: 0.85rem; margin: 0.05rem 0 0.25rem; }}
+.occd-step-num {{ flex: none; width: 2.35rem; height: 2.35rem; border-radius: 50%; display: flex; align-items: center;
+  justify-content: center; font-weight: 800; font-size: 1.15rem; color: #FFFFFF;
+  background: linear-gradient(135deg, {navy} 0%, #0060C0 100%); box-shadow: 0 3px 8px rgba(0,53,142,0.30); }}
+.occd-step-title {{ font-size: 1.45rem; font-weight: 800; color: {heading}; line-height: 1.15; }}
+.occd-step-sub {{ font-size: 0.92rem; color: {muted}; margin-top: 0.1rem; }}
+
+/* ---- the controls that decide the run: tinted panels */
+.stApp .st-key-method_panel, .stApp .st-key-factor_method_box {{
+  background: {tint}; border: 1px solid {edge}; border-left: 5px solid {blue}; border-radius: 12px;
+  padding: 0.85rem 1.1rem 0.95rem !important;
+}}
+.stApp .st-key-clean_method [data-testid="stWidgetLabel"] p,
+.stApp .st-key-factor_method [data-testid="stWidgetLabel"] p {{ font-weight: 700; font-size: 1.02rem; color: {heading}; }}
+/* the options of the two segmented controls (buttons with role radio, aria-checked on the chosen one) */
+.stApp .st-key-clean_method button[role="radio"], .stApp .st-key-factor_method button[role="radio"] {{
+  min-height: 2.6rem; padding: 0.5rem 1.15rem; font-weight: 600; font-size: 0.98rem; background: {card};
+  color: {pill_txt}; }}
+.stApp .st-key-clean_method button[role="radio"] p, .stApp .st-key-factor_method button[role="radio"] p {{
+  font-weight: 600; color: {pill_txt}; }}
+.stApp .st-key-clean_method button[role="radio"]:hover, .stApp .st-key-factor_method button[role="radio"]:hover {{
+  background: {tint}; border-color: {blue}; }}
+.stApp .st-key-clean_method button[role="radio"][aria-checked="true"],
+.stApp .st-key-factor_method button[role="radio"][aria-checked="true"] {{
+  background: {navy}; border-color: {navy}; box-shadow: 0 2px 8px rgba(0,53,142,0.28); }}
+.stApp .st-key-clean_method button[role="radio"][aria-checked="true"] p,
+.stApp .st-key-factor_method button[role="radio"][aria-checked="true"] p {{ color: #FFFFFF; }}
+/* the column mapping: a tinted, edged expander */
+.stApp .st-key-colmap [data-testid="stExpander"] details {{
+  border: 1px solid {edge}; border-left: 5px solid {navy}; border-radius: 12px; background: {card}; overflow: hidden; }}
+.stApp .st-key-colmap [data-testid="stExpander"] summary {{ background: {tint}; padding-top: 0.8rem; padding-bottom: 0.8rem; }}
+.stApp .st-key-colmap [data-testid="stExpander"] summary p {{ font-weight: 700; font-size: 1.02rem; color: {heading}; }}
+.stApp .st-key-colmap [data-testid="stExpander"] summary [data-testid="stIconMaterial"] {{ color: {heading}; }}
+/* other expanders of the main area: a soft hover */
+.stApp [data-testid="stMain"] [data-testid="stExpander"] details {{ border-radius: 12px; }}
+.stApp [data-testid="stMain"] [data-testid="stExpander"] summary:hover {{ background: {tint2}; }}
+.stApp [data-testid="stMain"] [data-testid="stExpander"] summary p {{ font-weight: 600; }}
+
+/* ---- tabs as pills: the selected one navy */
+.stApp [data-testid="stMain"] [data-testid="stTabs"] [role="tablist"] {{
+  gap: 0.4rem; flex-wrap: wrap; padding: 0.45rem; background: {tint2}; border: 1px solid {rule}; border-radius: 12px;
+  box-shadow: none; }}
+.stApp [data-testid="stMain"] [data-testid="stTab"] {{
+  height: auto; margin: 0; padding: 0.42rem 0.95rem; border-radius: 999px; background: {card}; border: 1px solid {edge};
+  transition: background 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease; }}
+.stApp [data-testid="stMain"] [data-testid="stTab"] p {{ font-weight: 600; font-size: 0.95rem; color: {pill_txt}; }}
+.stApp [data-testid="stMain"] [data-testid="stTab"]:hover {{ background: {tint}; border-color: {blue}; }}
+.stApp [data-testid="stMain"] [data-testid="stTab"][aria-selected="true"] {{
+  background: {navy}; border-color: {navy}; box-shadow: 0 2px 8px rgba(0,53,142,0.28); }}
+.stApp [data-testid="stMain"] [data-testid="stTab"][aria-selected="true"] p {{ color: #FFFFFF; }}
+.stApp [data-testid="stMain"] [data-testid="stTabs"] .react-aria-SelectionIndicator {{ display: none; }}
+.stApp [data-testid="stMain"] [data-testid="stTabPanel"] {{ padding-top: 0.6rem; }}
+.stApp [data-testid="stMain"] [data-testid="stTabPanel"] h3 {{ font-size: 1.35rem; }}
+
+/* ---- blocks nested in a step (field of interest, one filter): white cards, a smaller heading */
+.stApp .st-key-aoi_block, .stApp [class*="st-key-filter_box_"] {{
+  background: {card}; border-radius: 12px !important; border: 1px solid {rule} !important;
+  border-left: 4px solid {blue} !important; }}
+.stApp .st-key-aoi_block h3, .stApp [class*="st-key-filter_box_"] h3 {{ font-size: 1.2rem; padding: 0.2rem 0 0.45rem; }}
+
+/* ---- buttons: primary navy with a lift, secondary outlined, the main action larger, the DIFM download green */
+.stApp [data-testid="stBaseButton-primary"] {{
+  background: linear-gradient(180deg, #0A4FB8 0%, {navy} 100%); border: 1px solid #00307F; color: #FFFFFF;
+  font-weight: 600; box-shadow: 0 1px 2px rgba(16,24,40,0.10), 0 4px 12px rgba(0,53,142,0.22);
+  transition: transform 0.08s ease, box-shadow 0.15s ease, filter 0.15s ease; }}
+.stApp [data-testid="stBaseButton-primary"]:hover {{
+  filter: brightness(1.08); color: #FFFFFF; border-color: #00307F; transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(0,53,142,0.32); }}
+.stApp [data-testid="stBaseButton-primary"]:disabled {{ filter: grayscale(0.6) opacity(0.55); box-shadow: none;
+  transform: none; }}
+.stApp [data-testid="stMain"] [data-testid="stBaseButton-secondary"] {{ border-color: {edge}; color: {pill_txt};
+  font-weight: 500; }}
+.stApp [data-testid="stMain"] [data-testid="stBaseButton-secondary"]:hover {{ background: {tint}; border-color: {navy};
+  color: {pill_txt}; }}
+.stApp .st-key-run_go [data-testid="stBaseButton-primary"] {{
+  min-height: 3.3rem; padding: 0.75rem 2.3rem; border-radius: 12px; font-size: 1.12rem; font-weight: 700;
+  background: linear-gradient(135deg, {navy} 0%, #0060C0 70%, {blue} 130%); letter-spacing: 0.01em; }}
+.stApp .st-key-run_go [data-testid="stBaseButton-primary"] p {{ font-size: 1.12rem; font-weight: 700; }}
+.stApp [data-testid="stDownloadButton"] [data-testid="stBaseButton-primary"] {{
+  background: linear-gradient(180deg, #00A86B 0%, #00875A 100%); border-color: #007A50;
+  box-shadow: 0 1px 2px rgba(16,24,40,0.10), 0 4px 12px rgba(0,135,90,0.25); }}
+.stApp [data-testid="stDownloadButton"] [data-testid="stBaseButton-primary"]:hover {{
+  border-color: #007A50; box-shadow: 0 6px 18px rgba(0,135,90,0.32); }}
+
+/* ---- metrics as small cards */
+.stApp [data-testid="stMain"] [data-testid="stMetric"] {{ background: {card}; border-radius: 12px; }}
+[data-testid="stMetricLabel"], [data-testid="stMetricLabel"] p {{ font-weight: 600; }}
+.stApp [data-testid="stMain"] [data-testid="stMetricLabel"] p {{ text-transform: uppercase; letter-spacing: 0.05em;
+  font-size: 0.78rem; color: {muted}; }}
+[data-testid="stMetricValue"] {{ color: {heading}; font-weight: 700; }}
+
+/* ---- alerts, tables */
+.stApp [data-testid="stAlert"] > div {{ border-radius: 10px; }}
+.stApp [data-testid="stDataFrame"] {{ border-radius: 10px; overflow: hidden; }}
+
+/* ---- sidebar: section labels, white cards for the tree steps */
+[data-testid="stSidebar"] h3 {{ font-size: 0.82rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.09em;
+  color: {heading}; }}
+[data-testid="stSidebar"] [data-testid="stBaseButton-tertiary"] {{ color: {heading}; font-weight: 700; }}
+[data-testid="stSidebar"] [data-testid="stExpander"] details {{ background: {card}; border-radius: 10px;
+  border-color: {rule}; }}
+[data-testid="stSidebar"] [data-testid="stExpander"] summary p {{ font-weight: 600; }}
 .occd-rule {{ height: 1px; background: {rule}; border: 0; margin: 0.6rem 0 1.0rem; }}
 </style>"""
+
+
+def step_header(num: int, title: str, subtitle: str = "") -> None:
+    """The heading of a step card: a numbered navy badge, the title and a one-line subtitle (the .occd-step classes
+    of inject())."""
+    import html
+    import streamlit as st
+    st.html(f'<div class="occd-step"><div class="occd-step-num">{int(num)}</div><div><div class="occd-step-title">'
+            f'{html.escape(title)}</div>' + (f'<div class="occd-step-sub">{html.escape(subtitle)}</div>' if subtitle
+                                             else "") + "</div></div>")
+
+
+def brand_block() -> None:
+    """The name, version and tagline of the title bar (white on navy)."""
+    import html
+    import streamlit as st
+    st.html(f'<div class="occd-brand"><div class="occd-brand-name">{html.escape(NAME)}<span class="occd-pill">'
+            f'v{html.escape(VERSION)}</span></div><div class="occd-brand-tag">{html.escape(TAGLINE)}</div></div>')
 
 
 def inject():
@@ -137,5 +298,5 @@ def rule():
 
 
 def footer_caption() -> str:
-    """The sidebar footer: 'OCCD 2.4.1 · Olds College Smart Farm (OFPE)'."""
+    """The sidebar footer: 'OCCD 2.6.0 · Olds College Smart Farm (OFPE)'."""
     return f"{NAME} {VERSION} · {ORG}"

@@ -36,10 +36,13 @@ delay before F7 and F8 failed its pre-registered test and stays an option); the 
 5. **Sessions and the moisture basis are diagnosed, never corrected** (section 5): the run says on which basis the
    yield should be mapped and which column is the block.
 6. **Several combines are harmonised only when the difference is proven** (section 6); the factor goes to a new
-   column `Yld_Harm`, which is then the column to map in DIFM (DIFM has no machine term). Every pair of combines that
-   harvested side by side enters one solution (a combine gets its factor through its neighbours), and one factor must
-   fit both halves of the field. Per-combine weighed totals (settings file or CLI only) replace the paired estimate
-   when they exist; the paired estimate then validates them.
+   column `Yld_Harm`, which is then the column to map in DIFM (DIFM has no machine term). The factor is a step after
+   the cleaning (the OCCD cascade or the SMS 3-sigma sequence). How the combines shared the field is measured first
+   (interleaved passes, mixed, blocks) and decides which method can be trusted: auto = the paired cells on
+   interleaved or mixed passes, no factor in blocks; machine x machine, track x track and point x point can be chosen,
+   each with a traffic light. Every pair of combines that harvested side by side enters one solution (a combine gets
+   its factor through its neighbours), and one factor must fit both halves of the field. Per-combine weighed totals
+   (settings file or CLI only) replace the paired estimate when they exist; the paired estimate then validates them.
 7. **Level.** When the grower's weight (scale or cart total, in lb / kg / bu / t) exists, `L = weight / monitor
    total of the processed set` and the leveled columns `Yld_Level = mapped dry yield x factor x L` and `Yld_Lvl_Sy =
    Yld_Dry_Sy x factor x L` are written; the leveled column is then the one to map in DIFM. The total must belong to
@@ -410,7 +413,74 @@ after the AOI pre-step; `Yld_Dry_Sy` recommended. Trial 29: Ms 13.5 % (decoder, 
 
 ## 6. Several combines
 
-The reference is the combine with the most kept points (`machines.reference` "auto", or an id; an id whose records
+**The combines.** The machine column; without one (`machines.from_dataset`), the sources SMS writes in parentheses
+at the end of the dataset names when two or more differ, or the dataset names themselves when every one is a VIN
+(17 letters and digits, a John Deere export named by combine). The factor is computed on the kept points **after the
+cleaning**: after the OCCD cascade, and after the SMS 3-sigma sequence too (an OCCD step, not part of SMS).
+
+**6.1 How the combines shared the field (harvest layout).** For every pair of combines (a, b), on the kept points:
+adj_a = the share of the passes of a with >= 10 points within D = 1.5 x the median header width of a point of b, adj_b
+the same for b, **adjacency** = (adj_a + adj_b) / 2; **mixing** = the share of the 100 m squares holding >= 5 points of
+both among those holding as many of either (a diagnostic). Adjacency >= 50 % = **interleaved passes**, 10-50 % =
+**mixed**, < 10 % = **blocks**, 0 = **no contact** (house thresholds, set from the evidence below). A combine's local
+layout is that of its best-connected partner (the local methods reach the reference through the network); its
+whole-field layout is that of its pair with the reference.
+
+**6.2 Four methods** (every one is computed and reported, `R['machines']['methods']`):
+
+| Method | Factor of combine m (reference r) | Units and CI | Network, spatial check |
+|---|---|---|---|
+| Paired cells | exp(mean log(y_r / y_m)) over the 30 m and 50 m cells with >= 5 points of both (<= 2 % overlap, same plot) | cells; bootstrap over pass pairs; >= 30 cells and >= 5 pass pairs at both sizes, the two sizes within 2 % | yes, yes |
+| Track x track | exp(mean over pass pairs of log(mean of r's points / mean of m's points along their common edge)), every pass pair with >= 10 matched points (within D) on each side | pass pairs; bootstrap over pass pairs; >= 5 pass pairs | yes, yes |
+| Point x point | exp(mean log(y of the nearest r point within D / y of the m point)) over every m point | points; block bootstrap over pass pairs; >= 5 pass pairs | yes, yes |
+| Machine x machine | mean of every kept point of r / mean of every kept point of m (Maldaner et al. 2016 eq. 1; the per-machine normalisation y_i / y_m of Carneiro & Shiratsuchi 2022) | kept points; resampling the passes of each combine; >= 5 passes each | not needed (whole-field ratios are transitive), no |
+
+Maldaner et al. (2016) use one pair of closest paths for the track and point factors and the arithmetic mean of the
+point ratios; here every pass pair (every matched point) of the field enters a geometric mean with a CI: on the
+pseudo-combines a single path pair put the factor off by more than 5 % in 18-55 % of the splits. All methods pass the
+gates of the paired cells (CI excludes 1, 1 % < |f - 1| <= 10 %, above 10 % a ticket closure candidate, one factor fits
+both halves of the field), without the cell-size agreement for the three single-estimate methods and without the
+spatial check for machine x machine.
+
+**6.3 The method applied** (`machines.method`): **auto** (default) = the paired cells where the combine met another
+on interleaved or mixed passes, **no factor** in blocks or without contact (the field's scale ticket alone levels the
+yield); `cells`, `track`, `point` or `machine` force one method. Traffic lights (house rule from the evidence):
+
+| Layout | Paired cells | Track x track | Point x point | Machine x machine |
+|---|---|---|---|---|
+| Interleaved passes | green | green | green | green |
+| Mixed | green | green | yellow | yellow |
+| Blocks | yellow | yellow | red | red |
+| No contact | red | red | red | red |
+
+A yellow or red light on an applied factor is written into its decision, a red one also into the warnings.
+
+**6.4 Evidence.** The engine itself (`combine_factors`) on pseudo-combines with a known factor: the kept points of one
+real combine (11 single-combine data sets of 6 fields, 2-3 combines each harvested apart) split into A / B
+by 10 harvest layouts (alternate passes; bands of 2, 3 and 5 passes; 4 random splits; halves 50/50 and 70/30; one half
+alternate and the other a block), B multiplied by k = 1.00, 1.03, 1.05 or 1.10, so the true factor of B is 1 / k (484
+splits; the layout classes come from the measured adjacency, not from the layout's name):
+
+| Layout (splits) | Paired cells | Track x track | Point x point | Machine x machine |
+|---|---|---|---|---|
+| Interleaved (308): 90th percentile / max of the error | 3.5 % / 5.0 % | 4.1 % / 8.8 % | 4.1 % / 7.7 % | 4.9 % / 11.0 % |
+| Interleaved: false factors at k = 1 | 3 / 77 | 5 / 77 | 5 / 77 | 5 / 77 |
+| Interleaved: true factor applied at k = 1.03 or 1.05 | 73 / 154 | 85 / 154 | 103 / 154 | 75 / 154 |
+| Mixed (116): applied factors, 90th percentile of the error | 3.1 % | 2.0 % | 5.4 % | 5.0 % |
+| Mixed: false factors at k = 1 | 0 / 29 | 0 / 29 | 2 / 29 | 4 / 29 |
+| Blocks (44) | never applied (too few pairs) | never applied | applied 2 x, once 13 % off | applied 20 x, up to 14 % off, 7 by > 2 %; false 2 / 11 |
+| No contact (16) | no estimate | no estimate | no estimate | 2.4 % (90th percentile; halves of one combine's field) |
+
+The paired cells are the most conservative (no estimate more than 5 % off on interleaved passes, no false factor in
+mixed layouts) and the default; point x point finds a true factor most often but puts more false ones; machine x
+machine is right only when both combines cut the same mix of ground, the assumption of the normalisation x_i / x_m.
+On the real fields: the 2026 wheat export of four monitors (pairs interleaved, 58 %, or mixed, 22-51 %): cells 1.0268,
+track 1.0233, point 1.0200, machine x machine 1.0375 for the display that reads low (auto: cells, applied); a
+two-combine wheat trial with VIN dataset names, each combine on its own half (adjacency 2 %): auto applies nothing,
+machine x machine reads 0.896 (above the 10 % gate; red); a two-combine field with mixed passes (18 %): the cells,
+tracks and points include 1, machine x machine reads 0.9665 (yellow); two combines that never met: no factor.
+
+**6.5 The paired cells in detail.** The reference is the combine with the most kept points (`machines.reference` "auto", or an id; an id whose records
 the cascade removed falls back to "auto" with a warning). **The factor is applied to the non-reference combines**: a
 reference that reads 5 % high appears as a factor of about 1.05 on the other combine, never as 0.95 on the reference.
 **Every pair of combines** is compared on paired cells of 30 m and of 50 m that both harvested (>= 5 kept points of
@@ -676,9 +746,11 @@ Rules that make the numbers the ones typed in SMS:
     SMS recomputes Speed = Distance / Duration (the speed limits of S3 are computed on that speed);
   - a reading is removed when every column is covered, or 95 % of it; a narrowed or shortened reading's per-area
     values are multiplied by (W x D) / (W' x D') and its point moved to the centre of the kept strip.
-- **No flow-delay shift, no combine harmonisation**: neither is part of the SMS sequence (SMS applies the monitor's
-  flow delay at import). The grower's weight still levels the map (`Yld_Level` on the SMS yield, as SMS *Adjust
-  Yield* would) and the moisture basis and sessions are still reported.
+- **No flow-delay shift**: not part of the SMS sequence (SMS applies the monitor's flow delay at import). With
+  several combines the **combine factor** of section 6 follows the SMS sequence, on its kept points (an OCCD step
+  after the cleaning, not part of SMS; `Yld_Harm` = the SMS yield x the factor). The grower's weight still levels the
+  map (`Yld_Level` on the SMS yield, as SMS *Adjust Yield* would) and the moisture basis and sessions are still
+  reported.
 
 **What is written.** The DIFM-ready file is what SMS exports after the swath step (checked cell by cell against
 the Trial 19 SMS clean export):

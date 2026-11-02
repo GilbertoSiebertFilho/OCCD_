@@ -161,7 +161,7 @@ AUTO = "auto"
 CROP_UNKNOWN = "(not set: small-cereal defaults)"
 CORR_KEYS = ["lag_mode", "lag_records", "lag_auto", "lag_stage", "lag_axis", "harmonise", "ticket", "ticket_unit",
              "ticket_basis", "ticket_moisture", "ticket_confirms", "aoi_buffer", "aoi_clip", "std_m", "shrink_mode", "add_sym",
-             "ref_machine", "same_plot", "max_factor", "from_dataset", "crop_clean"]
+             "ref_machine", "same_plot", "max_factor", "from_dataset", "factor_method", "crop_clean"]
 TICKET_UNITS = list(getattr(er, "TICKET_UNITS", ("lb", "kg", "bu", "t")))
 TICKET_UNIT_LABEL = {"lb": "lb", "kg": "kg", "bu": "bu", "t": "t (metric)"}
 # the engine's machines settings know the ticket closure test (machines.ticket_confirms) in a v2 ticket engine
@@ -196,6 +196,47 @@ SMS_GROUPS = ["auto", "task", "machine", "field"]
 SMS_GROUP_LABEL = {"auto": "Auto (as in SMS)", "task": "Per task", "machine": "Per combine", "field": "Whole field"}
 SMS_D = dict((yc.DEFAULT_SETTINGS.get("sms3sigma") or {}))
 SMS_NOT_USED = "Not used by the SMS 3-sigma method (see the SMS 3-sigma tab)."
+# how the combine factor is computed (engine settings machines.method; engine/clean/machines.py combine_factors)
+FACTOR_METHODS = ["auto", "cells", "track", "point", "machine"]
+FACTOR_LABEL = {"auto": "Auto (recommended)", "cells": "Paired cells", "track": "Track × track",
+                "point": "Point × point", "machine": "Machine × machine"}
+LAYOUT_LABEL = {"interleaved": "Interleaved passes", "mixed": "Mixed", "blocks": "Blocks", "no_contact": "No contact"}
+LIGHT_ICON = {"green": "🟢", "yellow": "🟡", "red": "🔴", None: "⚪"}
+FACTOR_HELP = {
+    "auto": "Auto: the paired cells where the combines met on interleaved or mixed passes (the most conservative method "
+            "in the tests: never more than 5 % off); no factor where each combine cut its own block or they never "
+            "met - then only the grower's weight levels the field.",
+    "cells": "Paired cells: 30 m and 50 m squares where both combines cut neighbouring passes, proven at both sizes "
+             "and in both halves of the field. Green on interleaved and mixed passes, yellow in blocks.",
+    "track": "Track × track: every pair of adjacent passes (one of each combine) compares its yield along the common "
+             "edge, all pairs together. Green on interleaved and mixed passes, yellow in blocks.",
+    "point": "Point × point: every point against the nearest point of the other combine. Finds a real difference "
+             "more often on interleaved passes but is noisier: green interleaved, yellow mixed, red in blocks.",
+    "machine": "Machine × machine: the whole-field mean of each combine (Maldaner et al. 2016; the LSU AgCenter "
+               "normalisation). Right only when the combines alternated passes: green interleaved, yellow mixed, red "
+               "in blocks, where it mixes the machine with the ground each combine cut."}
+FACTOR_GUIDE = """| How the combines harvested | Paired cells | Track × track | Point × point | Machine × machine |
+|---|:---:|:---:|:---:|:---:|
+| **Interleaved passes** (≥ 50 % of the passes beside the other combine) | 🟢 | 🟢 | 🟢 | 🟢 |
+| **Mixed** (10–50 %) | 🟢 | 🟢 | 🟡 | 🟡 |
+| **Blocks** (< 10 %: each combine its own part of the field) | 🟡 | 🟡 | 🔴 | 🔴 |
+| **No contact** (never side by side) | 🔴 | 🔴 | 🔴 | 🔴 |
+
+**Auto** = paired cells on interleaved or mixed passes; no factor in blocks or without contact."""
+FACTOR_EVIDENCE = ("Evidence: 484 tests on 11 real single-combine data sets, each split into two pseudo-combines by a "
+                   "harvest layout with a known factor (0, 3, 5 or 10 %). Interleaved passes: 90 % of the paired-cell "
+                   "factors within 3.5 % (never more than 5 % off), track and point within 4.1 %, machine × machine "
+                   "within 4.9 % but up to 11 % off; point × point found the true factor most often (103 of 154, "
+                   "cells 73) with more false factors (5 of 77, cells 3). Mixed: the applied factors were off by up to "
+                   "3.1 % (cells), 2.0 % (track), 5.4 % (point) and 5.0 % (machine × machine) at the 90th percentile. "
+                   "Blocks: machine × machine was applied with errors up to 14 %; the cells and the tracks never "
+                   "passed their gates. Machine × machine is the method of Maldaner et al. (2016) and the LSU AgCenter "
+                   "normalisation (Carneiro & Shiratsuchi): it assumes both combines cut the same mix of ground.")
+GATE_LABEL = {"applied": "passes the gates", "ci_includes_1": "CI includes 1", "too_few_pairs": "too few pairs",
+              "no_link": "no link to the reference", "above_max_factor": "above the max",
+              "above_max_factor_unconfirmed": "above the max, not proven", "below_min_factor": "below 1 %",
+              "sizes_disagree": "30 m and 50 m disagree", "spatially_inconsistent": "differs over the field",
+              "layout": "not used (harvest layout)"}
 
 st.set_page_config(page_title=brand.NAME, page_icon=brand.page_icon(), layout="wide")
 if os.path.exists(brand.LOGO_H):                         # the horizontal logo in the sidebar, the shield when collapsed
@@ -420,16 +461,13 @@ def is_dirty() -> bool:
     return ss.cands is not None and not bool(ss.get("field_fresh"))
 
 
-OCCD_ONLY_KEYS = ("filters", "lag_correction", "lag_stage", "lag_axis", "harmonise_machines")
-OCCD_ONLY_MACHINES = ("harmonise", "reference", "min_pairs", "min_pass_pairs", "ci", "min_factor", "max_factor",
-                      "same_plot_only", "bootstrap_reps", "seed", "pair_max_overlap", "ticket_confirms",
-                      "ticket_close_tol")
+OCCD_ONLY_KEYS = ("filters", "lag_correction", "lag_stage", "lag_axis")
 
 
 def run_key_settings(settings: dict) -> dict:
     """The part of the merged settings the chosen method uses: the OCCD cascade ignores the SMS 3-sigma options (and
-    its key is then exactly the one of v2.2), the SMS 3-sigma method ignores the filters, the flow delay and the
-    combine harmonisation; 'both' uses everything."""
+    its key is then exactly the one of v2.2), the SMS 3-sigma method ignores the filters and the flow delay (the combine
+    factor follows both methods); 'both' uses everything."""
     S = copy.deepcopy(settings or {})
     m = S.get("method", "occd")
     if m == "occd":
@@ -438,8 +476,6 @@ def run_key_settings(settings: dict) -> dict:
     elif m == "sms3sigma":
         for k in OCCD_ONLY_KEYS:
             S.pop(k, None)
-        for k in OCCD_ONLY_MACHINES:
-            (S.get("machines") or {}).pop(k, None)
     return S
 
 
@@ -639,7 +675,8 @@ def step3_defaults(shp: str, det: dict, fields: list, crop_guess, tag: str) -> d
               "lag_axis": yc.DEFAULT_SETTINGS["lag_axis"],
               "ticket": None, "ticket_unit": "lb", "ticket_basis": "dry", "ticket_moisture": None,
               "aoi_buffer": float(AOI_CUT_M), "aoi_clip": True, "std_m": None, "shrink_mode": "auto",
-              "ref_machine": AUTO, "same_plot": True, "max_factor": 10.0, "from_dataset": True})
+              "ref_machine": AUTO, "same_plot": True, "max_factor": 10.0, "from_dataset": True,
+              "factor_method": "auto"})
     if ENGINE_TICKET_CONFIRMS:
         W["ticket_confirms"] = True
     W.update(sms_widget_defaults())
@@ -724,6 +761,7 @@ def apply_settings_to_widgets(S: dict, shp: str, rec: dict, D, cand):
     W["ref_machine"] = ref if (ref == AUTO or str(ref) in machines) else AUTO
     W["same_plot"] = bool(MC.get("same_plot_only", True))
     W["from_dataset"] = bool(MC.get("from_dataset", True))
+    W["factor_method"] = MC.get("method") if MC.get("method") in FACTOR_METHODS else "auto"
     if _float(MC.get("max_factor")) is not None:
         W["max_factor"] = _float(MC["max_factor"]) * 100.0
     if ENGINE_TICKET_CONFIRMS and "ticket_confirms" in MC:
@@ -1019,25 +1057,26 @@ def header():
     """The page header: the horizontal logo, the name with its tagline, and Start over with the current field (a
     placeholder: the name is written by header_field() at the end of the page, so that a run saved in this very run
     shows as saved)."""
-    # the first column holds the 190 px logo down to a 1366 px screen with the sidebar open (about 205 px at a 970 px
-    # content width); below that the image shrinks with its column
-    h1, h2, h3 = st.columns([1.5, 3.6, 1.6], vertical_alignment="center")
-    with h1:
-        if os.path.exists(brand.LOGO_H):
-            st.image(brand.LOGO_H, width=190)
-    with h2:
-        st.title(brand.NAME, anchor=False)
-        st.caption(brand.TAGLINE)
-    with h3:
-        if st.button("Start over", icon=":material/restart_alt:", key="start_over",
-                     help="Clears the screen: input, field of interest, settings and result. Saved fields are kept."):
-            if is_dirty():
-                start_over_dialog()
-            else:
-                start_over()
-                st.rerun()
-        HEADER["field"] = st.empty()
-    brand.rule()                                          # the thin light rule under the header
+    # the navy title bar (the app_header key is its CSS hook, app/brand.py): the white logo, the name with its version
+    # and tagline, Start over; the first column holds the 200 px logo down to a 1366 px screen with the sidebar open
+    with st.container(key="app_header"):
+        h1, h2, h3 = st.columns([1.4, 3.8, 1.5], vertical_alignment="center")
+        with h1:
+            logo = brand.LOGO_H_REV if os.path.exists(brand.LOGO_H_REV) else brand.LOGO_H
+            if os.path.exists(logo):
+                st.image(logo, width=200)
+        with h2:
+            brand.brand_block()
+        with h3:
+            if st.button("Start over", icon=":material/restart_alt:", key="start_over",
+                         help="Clears the screen: input, field of interest, settings and result. Saved fields are "
+                              "kept."):
+                if is_dirty():
+                    start_over_dialog()
+                else:
+                    start_over()
+                    st.rerun()
+            HEADER["field"] = st.empty()
 
 
 def header_field():
@@ -1339,13 +1378,13 @@ def render_tree():
                               "(Yld_Level / Yld_Lvl_Sy).")
             tree_heading("Combines")
             with st.container(gap=None):
-                if method == "sms3sigma":
-                    tree_row("Harmonise combines", "not used by SMS 3-sigma", anchor="combines")
-                else:
-                    tree_row("Harmonise combines", notes.get("harmonise", "") if ss.get("harmonise", True) else
-                             ("off" if R else ""), anchor="combines", key="harmonise",
-                             help="Only acts when the data name more than one combine (a combine id column, or "
-                                  "different sources at the end of the dataset names) and the difference is proven.")
+                fm = ss.get("factor_method") if ss.get("factor_method") in FACTOR_METHODS else "auto"
+                tree_row(f"Combine factor ({FACTOR_LABEL[fm].replace(' (recommended)', '')})",
+                         notes.get("harmonise", "") if ss.get("harmonise", True) else ("off" if R else ""),
+                         anchor="combines", key="harmonise",
+                         help="Only acts when the data name more than one combine (a combine id column, different "
+                              "sources at the end of the dataset names, or dataset names that are VINs) and the "
+                              "difference is proven; after the OCCD cascade or the SMS 3-sigma sequence.")
             tree_heading("Sessions & moisture")
             with st.container(gap=None):
                 tree_row("Symmetric dry yield column (Yld_Dry_Sy)", notes.get("add_sym", "") if ss.get("add_sym", True)
@@ -1644,8 +1683,9 @@ header()
 show_field_notice()
 
 # ------------------------------------------------------------------------------------------------ 1 input
-with st.container(border=True):
-    st.subheader(":material/upload_file: 1 · Input")
+with st.container(border=True, key="occd_step_1"):                # the key is the CSS hook of the step card (brand)
+    brand.step_header(1, "Input", "Upload the monitor files or the point export, or open a file or folder on this "
+                                  "computer")
     ups = st.file_uploader("Upload files", accept_multiple_files=True, key=upload_key("uploads"),
                            help="A zip, the .shp + .shx + .dbf + .prj (+ .cpg) of a point export or its .kml / .kmz "
                                 "(SMS Export to Google Earth), or raw monitor files (a zipped .cn1 card folder, John "
@@ -1773,14 +1813,14 @@ AK = aoi["key"] if aoi else "noaoi"
 
 # ------------------------------------------------------------------------------------------------ 2 decode / check
 shp = None
-with st.container(border=True):
+with st.container(border=True, key="occd_step_2"):
     if not os.path.exists(cand.get("path") or cand["probe"].root):
         # the work folder vanished under the page (deleted from another tab or in Explorer): say so, no traceback
         st.error("The data of this run is no longer on disk (its folder was removed): start over, or open the input "
                  "again.", icon=":material/error:")
         stop_with_tree()
     if cand["kind"] == "raw":
-        st.subheader(":material/memory: 2 · Decode")
+        brand.step_header(2, "Decode", "Raw monitor data: choose the tasks and decode them into points")
         fid = cand["decoder"]
         root = cand["probe"].root
         if root not in ss.units:
@@ -1941,7 +1981,7 @@ with st.container(border=True):
         else:
             TREE["input"] = f"{cand['label']} · not decoded yet"
     else:
-        st.subheader(":material/scatter_plot: 2 · Export")
+        brand.step_header(2, "Export", "The point export as it will be cleaned")
         info = shp_info(cand["path"], mtime(cand["path"]))
         det = yc.detect_columns(info["fields"])
         with st.container(horizontal=True):
@@ -1965,9 +2005,9 @@ with st.container(border=True):
 
 # ------------------------------------------------------------------------------------------------ 3 cleaning
 settings, settings_error, S = None, None, None
-with st.container(border=True):
+with st.container(border=True, key="occd_step_3"):
     with st.container(horizontal=True, vertical_alignment="center"):
-        st.subheader(":material/tune: 3 · Cleaning")
+        brand.step_header(3, "Cleaning", "Crop, cleaning method, column mapping and the filters")
         st.button("Reset to house standard", on_click=reset_settings, icon=":material/restart_alt:")
     if shp is None:
         st.info("Decode the raw data first (step 2).", icon=":material/info:")
@@ -1984,34 +2024,37 @@ with st.container(border=True):
         crop_opts = [CROP_UNKNOWN] + list(common.CROPS)
         if f"crop_clean_{SK}" not in ss:
             ss[f"crop_clean_{SK}"] = crop_guess if crop_guess in common.CROPS else CROP_UNKNOWN
-        with st.container(horizontal=True, vertical_alignment="bottom"):
-            crop_sel = st.selectbox("Crop", crop_opts, key=f"crop_clean_{SK}",
-                                    help="Sets the F1 moisture window and the standard moisture of the moisture basis "
-                                         "(the crop table of engine/formats/common.py). Prefilled from the decoder or "
-                                         "the export's product name.")
-            st.caption(("Decoder crop: " + crop_guess) if (D and crop_guess) else
-                       ("Product column suggests: " + crop_guess) if crop_guess else
-                       "No crop found in the data: the small-cereal defaults apply (8-20 % moisture).")
-        crop_key = None if crop_sel == CROP_UNKNOWN else crop_sel
-        if ss.get("clean_method") not in METHODS:
-            ss["clean_method"] = "occd"
-        for k_, v_ in sms_widget_defaults().items():      # the SMS 3-sigma inputs start at the house defaults
-            if k_ != "clean_method" and k_ not in ss:
-                ss[k_] = v_
-        method = st.segmented_control(
-            "Cleaning method", METHODS, default="occd", required=True, key="clean_method",
-            format_func=METHOD_LABEL.get,
-            help="OCCD cascade: the house standard, filters F0-F11 with measured thresholds. SMS 3-sigma: the Ag Leader "
-                 "SMS Advanced sequence done by hand (clip to the field, Optimize Swath Widths, then speed, moisture and "
-                 "dry yield within mean ± 3 SD). Both: the two run on the same readings and step 4 compares them.") \
-            or "occd"
-        if method == "sms3sigma":
-            st.caption("SMS 3-sigma: the options are in the **SMS 3-sigma** tab below; the OCCD filters, the flow-delay "
-                       "correction and the combine harmonisation are not used.")
-        elif method == "both":
-            st.caption("Both methods run on the same readings: the OCCD cascade with the settings below and the SMS "
-                       "3-sigma sequence with the options of the **SMS 3-sigma** tab; step 4 shows each result and what "
-                       "differs between them.")
+        # the crop and the cleaning method decide the run: a tinted panel (the method_panel key is its CSS hook)
+        with st.container(key="method_panel"):
+            with st.container(horizontal=True, vertical_alignment="bottom"):
+                crop_sel = st.selectbox("Crop", crop_opts, key=f"crop_clean_{SK}",
+                                        help="Sets the F1 moisture window and the standard moisture of the moisture basis "
+                                             "(the crop table of engine/formats/common.py). Prefilled from the decoder or "
+                                             "the export's product name.")
+                st.caption(("Decoder crop: " + crop_guess) if (D and crop_guess) else
+                           ("Product column suggests: " + crop_guess) if crop_guess else
+                           "No crop found in the data: the small-cereal defaults apply (8-20 % moisture).")
+            crop_key = None if crop_sel == CROP_UNKNOWN else crop_sel
+            if ss.get("clean_method") not in METHODS:
+                ss["clean_method"] = "occd"
+            for k_, v_ in sms_widget_defaults().items():      # the SMS 3-sigma inputs start at the house defaults
+                if k_ != "clean_method" and k_ not in ss:
+                    ss[k_] = v_
+            method = st.segmented_control(
+                "Cleaning method", METHODS, default="occd", required=True, key="clean_method",
+                format_func=METHOD_LABEL.get,
+                help="OCCD cascade: the house standard, filters F0-F11 with measured thresholds. SMS 3-sigma: the Ag Leader "
+                     "SMS Advanced sequence done by hand (clip to the field, Optimize Swath Widths, then speed, moisture and "
+                     "dry yield within mean ± 3 SD). Both: the two run on the same readings and step 4 compares them.") \
+                or "occd"
+            if method == "sms3sigma":
+                st.caption("SMS 3-sigma: the options are in the **SMS 3-sigma** tab below; the OCCD filters and the "
+                           "flow-delay correction are not used. With several combines the combine factor (**Combines** tab) "
+                           "follows the SMS sequence, as in the OCCD run.")
+            elif method == "both":
+                st.caption("Both methods run on the same readings: the OCCD cascade with the settings below and the SMS "
+                           "3-sigma sequence with the options of the **SMS 3-sigma** tab; step 4 shows each result and what "
+                           "differs between them.")
         # seed / reseed F1 from the crop default: when the crop changes, and when the inputs' state is gone (a run
         # that died before step 3 drops the state of the widgets not drawn; the f_F1_crop marker is not a widget and
         # survives, so without this check the inputs would come back at 0-0 and the settings would be refused)
@@ -2020,7 +2063,7 @@ with st.container(border=True):
             ss["f_F1_min_pct"], ss["f_F1_max_pct"], ss["f_F1_crop"] = float(lo), float(hi), crop_key
 
         cols_override, harvester_w, tw_f9 = {}, None, None
-        with st.expander("Column mapping", icon=":material/table_chart:"):
+        with st.expander("Column mapping (sensor and record columns)", icon=":material/table_chart:", key="colmap"):
             st.caption("Prefilled from the column names. Required: dry yield, speed, heading, distance or duration, "
                        "and swath width (or a harvester width).")
             grid = st.columns(3)
@@ -2297,10 +2340,27 @@ with st.container(border=True):
                 s = f"{r['machine']} ({r['n']:,} readings"
                 return s + (f", mean {r['mean_yield']:.1f} bu/ac)" if r.get("mean_yield") is not None else ")")
             harmonise = bool(ss.get("harmonise", True))         # owned by the switch in the processing tree
-            st.subheader("Harmonise combines", anchor="combines")
-            st.caption("Only acts when the data name more than one combine (a combine id column, or different "
-                       "sources at the end of the dataset names) and the difference is proven at 30 m and 50 m (CIs "
-                       "exclude 1, factors agree within 2 %)." if harmonise else TREE_OFF_NOTE)
+            st.subheader("Combine factor (several combines)", anchor="combines")
+            st.caption("Runs after the cleaning (the OCCD cascade or the SMS 3-sigma sequence), on the kept points, "
+                       "only when the data name more than one combine (a combine id column, different sources at the "
+                       "end of the dataset names, or dataset names that are VINs). It first measures how the combines "
+                       "shared the field, then computes the factor with the method below; a factor is applied only "
+                       "when it is proven." if harmonise else TREE_OFF_NOTE)
+            if ss.get("factor_method") not in FACTOR_METHODS:
+                ss["factor_method"] = "auto"
+            with st.container(key="factor_method_box"):
+                factor_method = st.segmented_control(
+                    "How to compute the factor", FACTOR_METHODS, default="auto", required=True, key="factor_method",
+                    format_func=FACTOR_LABEL.get, disabled=not harmonise,
+                    help="Auto chooses from how the combines harvested (measured on the data): paired cells where "
+                         "they met on interleaved or mixed passes, no factor where each cut its own block. The other "
+                         "options force one method; every method is reported after the run, with a traffic light "
+                         "for the harvest layout.") or "auto"
+                st.caption(FACTOR_HELP[factor_method])
+            with st.expander("Which method for which harvest? The evidence", icon=":material/fact_check:",
+                             key="factor_guide"):
+                st.markdown(FACTOR_GUIDE)
+                st.caption(FACTOR_EVIDENCE)
             with st.container(horizontal=True, vertical_alignment="bottom"):
                 ref_machine = st.selectbox("Reference combine", [AUTO] + machines, key="ref_machine",
                                            disabled=not harmonise or len(machines) < 2, format_func=machine_label)
@@ -2328,10 +2388,11 @@ with st.container(border=True):
                                            "Mean yield (bu/ac)": [r.get("mean_yield") for r in mrows]}),
                              hide_index=True,
                              column_config={"Mean yield (bu/ac)": st.column_config.NumberColumn(format="%.1f")})
-                st.caption("Every pair of combines that harvested side by side is compared on the same ground; the "
-                           "pairs are solved together, so a combine that never met the reference still gets a factor "
-                           "through its neighbours. A factor is applied only when it is proven at 30 m and 50 m and the "
-                           "two halves of the field agree. The whole-field means are shown as a diagnostic only.")
+                st.caption("The local methods (cells, tracks, points) compare the combines where they harvested side "
+                           "by side, on the same ground; every pair of combines is solved together, so a combine that "
+                           "never met the reference still gets a factor through its neighbours. A factor is applied "
+                           "only when it is proven and one factor fits both halves of the field. The whole-field means "
+                           "(machine × machine) mix the machine with the ground each combine cut.")
             elif machines:
                 st.caption(f"One combine in the data ({machines[0]}): nothing to harmonise.")
             elif not from_dataset:
@@ -2339,7 +2400,7 @@ with st.container(border=True):
             else:
                 st.caption("No combine id column mapped and no different sources at the end of the dataset names: the "
                            "file is treated as one combine.")
-            sources_footer("machines", "machine harmonisation: house method")
+            sources_footer("machines", "combine factor: house method")
 
         # ---- the SMS 3-sigma sequence (engine/clean/sms3sigma.py)
         sms_settings = None
@@ -2423,7 +2484,8 @@ with st.container(border=True):
              "moisture": {"standard_pct": std_m, "shrink": shrink_mode, "add_symmetric_column": bool(add_sym)},
              "machines": {"harmonise": bool(harmonise), "reference": ref_machine or AUTO,
                           "totals_bu": totals or None, "same_plot_only": bool(same_plot),
-                          "max_factor": float(max_factor) / 100.0, "from_dataset": bool(from_dataset)}}
+                          "max_factor": float(max_factor) / 100.0, "from_dataset": bool(from_dataset),
+                          "method": factor_method}}
         if ticket_dict is not None:                     # the grower's weight: the v2 dict (unit, basis, moisture)
             S["scale_ticket"] = dict(ticket_dict)
         if ENGINE_TICKET_CONFIRMS:
@@ -2632,9 +2694,42 @@ def show_result(R: dict, where: str = "results"):
             if not RM:
                 st.caption("One combine (or no combine id column): nothing to harmonise.")
             else:
+                req_ = RM.get("method_requested") or "auto"
                 st.caption(f"Combines by the {RM.get('basis') or ('column ' + str(RM.get('column')))}; reference "
-                           f"{RM.get('reference') or '-'}; "
-                           f"method: {RM.get('method') or RM.get('rule') or '-'}")
+                           f"{RM.get('reference') or '-'}; factor computed after {RM.get('after') or 'the cleaning'} "
+                           f"with the method **{FACTOR_LABEL.get(req_, req_)}**.")
+                with st.expander("How the factor is computed (the rule of this run)", icon=":material/rule:"):
+                    st.caption(RM.get("method") or RM.get("rule") or "-")
+                lay_ = RM.get("layout") or []
+                if lay_:
+                    st.markdown("**How the combines shared the field**")
+                    st.dataframe(pd.DataFrame([{"combine a": r["a"], "combine b": r["b"],
+                                                "adjacency (%)": 100 * float(r["adjacency"]),
+                                                "mixing (%)": 100 * float(r["mixing"]),
+                                                "harvest layout": LAYOUT_LABEL.get(r["layout"], r["layout"])}
+                                               for r in lay_]), hide_index=True,
+                                 column_config={c: st.column_config.NumberColumn(format="%.0f")
+                                                for c in ("adjacency (%)", "mixing (%)")})
+                    st.caption("Adjacency = the share of each combine's passes with ≥ 10 points within 1.5 header "
+                               "widths of the other combine (mean of the two): ≥ 50 % interleaved passes, 10–50 % "
+                               "mixed, < 10 % blocks. Mixing = the share of the 100 m squares both combines cut.")
+                meths_ = RM.get("methods") or []
+                if meths_:
+                    st.markdown("**The four methods**")
+                    st.dataframe(pd.DataFrame([{
+                        "combine": r["machine"], "method": FACTOR_LABEL.get(r["method"], r.get("label")),
+                        "light": LIGHT_ICON.get(r.get("light"), "⚪"), "factor": r.get("factor"),
+                        "CI low": r.get("ci_lo"), "CI high": r.get("ci_hi"),
+                        "based on": (f"{int(r['n_units']):,} {r.get('unit') or ''}" if r.get("n_units") is not None
+                                     else "-"),
+                        "result": GATE_LABEL.get(r.get("gate"), r.get("gate") or "-"),
+                        "used": "✔" if r.get("used") else ""} for r in meths_]), hide_index=True,
+                        height=35 * (len(meths_) + 1) + 3,                   # every row, no inner scroll
+                        column_config={c: st.column_config.NumberColumn(format="%.4f")
+                                       for c in ("factor", "CI low", "CI high")})
+                    st.caption("Light = how far the method can be trusted for this harvest layout (pseudo-combine "
+                               "tests): 🟢 reliable, 🟡 use with care, 🔴 not reliable. Result = what the gates say "
+                               "for that method; ✔ = the method used for the factor.")
                 means = RM.get("means")
                 if isinstance(means, dict) and means:
                     st.markdown("**Per machine**")
@@ -2662,9 +2757,13 @@ def show_result(R: dict, where: str = "results"):
                     rows_ = []
                     for t_ in RM["tests"]:
                         sp = t_.get("spatial") or {}
-                        rows_.append({"combine": t_.get("machine"), "cell (m)": t_.get("cell_m"),
+                        mt_ = t_.get("method", "cells")
+                        rows_.append({"combine": t_.get("machine"),
+                                      "method": (f"cells {t_.get('cell_m')} m" if mt_ == "cells" else
+                                                 FACTOR_LABEL.get(mt_, mt_)),
                                       "factor": t_.get("factor"), "CI low": t_.get("ci_lo"), "CI high": t_.get("ci_hi"),
-                                      "cells": t_.get("n_cells"), "pass pairs": t_.get("n_pass_pairs"),
+                                      "based on": (t_.get("n_cells") if mt_ == "cells" else t_.get("n_units")),
+                                      "pass pairs": t_.get("n_pass_pairs"),
                                       "through": ", ".join(map(str, t_.get("via") or [])),
                                       "half 1": sp.get("factor_half_1"), "half 2": sp.get("factor_half_2"),
                                       "whole-field ratio (diagnostic)": wf.get(t_.get("machine")),
@@ -2862,11 +2961,11 @@ def show_comparison(C: dict | None, R: dict, R3: dict | None):
 
 
 # ------------------------------------------------------------------------------------------------ 4 run
-with st.container(border=True):
-    st.subheader(":material/rocket_launch: 4 · Run and download")
+with st.container(border=True, key="occd_step_4"):
+    brand.step_header(4, "Run and download", "Run the cleaning, check the result and download the DIFM-ready file")
     seed_field_name(aoi, (S or {}).get("tag") if S else None)        # before the widget: the default name follows the input
     with st.container(horizontal=True, vertical_alignment="bottom"):
-        go = st.button("Run cleaning", type="primary", icon=":material/play_arrow:",
+        go = st.button("Run cleaning", type="primary", icon=":material/play_arrow:", key="run_go",
                        disabled=shp is None or settings is None)
         st.text_input("Field name", key="field_name", on_change=field_name_changed,
                       help="The name of the saved field (sidebar). Default: the name in the field-of-interest file, "

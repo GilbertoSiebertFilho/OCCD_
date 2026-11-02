@@ -29,7 +29,8 @@ and the DIFM column mapping is the same with and without cleaning.
 
 settings["method"]: "occd" (above; outputs and bytes unchanged from v2.2) | "sms3sigma" (the Ag Leader SMS 3-sigma
 sequence S0 import check, S1 clip, S2 Optimize Swath Widths, S3 speed, S4 moisture, S5 dry-yield mean +/- 3 SD per
-group; engine/clean/sms3sigma.py and sms_swath.py; no cascade F0-F11, no flow-delay scan, no combine harmonisation) |
+group; engine/clean/sms3sigma.py and sms_swath.py; no cascade F0-F11, no flow-delay scan; with several combines the
+combine factor of machines.method follows the SMS sequence, as in the OCCD run, an OCCD step after the cleaning) |
 "both" (both methods and a comparison in out_dir/compare; engine/clean/compare.py, run_both). The sms3sigma
 DIFM-ready file is written as SMS exports it after the swath step and so departs from the principle above on
 purpose (docs/METHOD.md section 10; write_points `patch`): the width column holds the new width of the narrowed
@@ -114,8 +115,13 @@ Steps
      keep Harv_Day as a block" when sessions differ by > 2 moisture points or > 20 % of the readings fall below Ms
      under one-sided shrink; house rules). Figure fig_clean_sessions.png.
   4. several combines (a machine column with > 1 value; without one, with machines.from_dataset, two or more
-     sources in parentheses at the end of the dataset names, each source a combine: sms3sigma.dataset_machines;
-     machines.harmonise true; engine/clean/machines.py): paired
+     sources in parentheses at the end of the dataset names, or dataset names that are VINs, each a combine:
+     sms3sigma.dataset_machines; machines.harmonise true; engine/clean/machines.py, after the cascade or the SMS
+     3-sigma sequence, on the kept points). First the harvest layout of every pair of combines (interleaved passes,
+     mixed, blocks, no contact: the adjacency of their passes) and the four methods (paired cells, machine x machine,
+     track x track, point x point) with a traffic light each; machines.method chooses the factor ("auto" = the
+     paired cells where the combines met on interleaved or mixed passes, no factor in blocks or without contact).
+     The paired cells:
      30 m and 50 m cells (>= 5 kept points of both machines with <= machines.pair_max_overlap = 2 % of the footprint
      already cut, same plot when a plan exists) against the reference machine (machines.reference "auto" = most kept
      points; the factor goes on the OTHER machines); f = exp(mean(log(ref / m))) with a block-bootstrap CI over pass
@@ -325,11 +331,14 @@ DEFAULT_SETTINGS = {
     # the end of the dataset names when they differ (sms3sigma.dataset_machines); false = one combine, as before
     # network: the factor of a combine from every neighbouring pair of combines (weighted least squares), not only
     # from its pair with the reference; spatial_check: one factor must fit both halves of the field (machines.py)
+    # method: how the factor is computed - "auto" (paired cells where the combines met on interleaved or mixed passes,
+    # no factor in blocks), "cells", "machine" (machine x machine, whole-field means), "track" (track x track) or
+    # "point" (point x point); the harvest layout and all four methods are reported whatever the choice
     "machines": {"harmonise": True, "reference": "auto", "totals_bu": None, "min_pairs": 30, "min_pass_pairs": 5,
                  "ci": 0.95, "min_factor": 0.01, "max_factor": 0.10, "same_plot_only": True, "bootstrap_reps": 1000,
                  "seed": 2026, "pair_max_overlap": machines_mod.PAIR_MAX_OVERLAP, "ticket_confirms": True,
                  "ticket_close_tol": machines_mod.TICKET_CLOSE_TOL, "from_dataset": True, "network": True,
-                 "spatial_check": True},
+                 "spatial_check": True, "method": "auto"},
     # cleaning method: "occd" (the cascade above), "sms3sigma" (the SMS 3-sigma sequence, settings in "sms3sigma")
     # or "both" (both on the same readings, then engine/clean/compare.py writes the comparison)
     "method": "occd",
@@ -650,6 +659,14 @@ def merge_settings(user=None) -> dict:
     for name in ("from_dataset", "network", "spatial_check"):
         if not isinstance(Ma[name], bool):
             raise ValueError(f"machines.{name} must be true or false, not {Ma[name]!r}")
+    mm_ = str(Ma["method"] if Ma["method"] is not None else "auto").strip().lower()
+    mm_ = {"machine_x_machine": "machine", "combine": "machine", "whole": "machine", "track_x_track": "track",
+           "point_x_point": "point", "paired_cells": "cells"}.get(mm_, mm_)
+    if mm_ not in machines_mod.FACTOR_METHODS:
+        raise ValueError(f"machines.method must be one of {list(machines_mod.FACTOR_METHODS)} (auto = paired cells "
+                         "where the combines met on interleaved or mixed passes, no factor in blocks), not "
+                         f"{Ma['method']!r}")
+    Ma["method"] = mm_
     # ---- cleaning method
     m = str(S["method"] if S["method"] is not None else "occd").strip().lower()
     if m not in METHOD_ALIASES:
@@ -729,7 +746,7 @@ COLUMN_ALIASES = {
     "speed_mph": ["Speed_mph_", "Speed_mph", "VEHICLSPEED", "VEHICSPEED", "Speed"],
     "distance_ft": ["Distance_f", "Distance_ft", "DISTANCE", "Dist_ft"],
     "width_ft": ["Swth_Wdth_", "Swath_Width", "SwathWidth", "SWATHWIDTH", "Swth_Wdth", "Width_ft", "Width"],
-    "heading": ["Track_deg_", "Track_deg", "Heading", "Track", "Direction", "Course"],
+    "heading": ["Track_deg_", "Track_deg", "Hding_Veh_", "Heading", "Track", "Direction", "Course"],
     "duration_s": ["Duration_s", "Duration", "Elapsed_s"],
     "wet_mass_lbac": ["Yld_Mass_W", "Yld_Mass_Wet", "WetMass", "Wet_Mass"],
     "dataset": ["Dataset", "Task", "TaskName", "Task_Name", "Load", "LoadName"],
@@ -1636,7 +1653,7 @@ def clean(path, S, C, log=print, source=None):
     elif dm is not None:
         g["_machine"], machine_basis = dm[0], f"{dm[1]} ({C['dataset']})"
         per = pd.Series(dm[0]).value_counts()
-        notes.append(f"combines: no machine column, so the source at the end of the dataset names tells them apart - "
+        notes.append(f"combines: no machine column, told apart by the {dm[1]} - "
                      f"{len(per)} combines: " + ", ".join(f"{m} ({n:,} records)" for m, n in per.items())
                      + "; the F8 controls, the sessions and the harmonisation keep to each (settings "
                      "machines.from_dataset false: one combine)")
@@ -1833,9 +1850,10 @@ def clean(path, S, C, log=print, source=None):
                          "scaled by Optimize Swath Widths, the lower one floored at "
                          f"{S['sms3sigma']['yield_floor']}; another yield pass only while the previous one cut the SD by "
                          f"more than {S['sms3sigma']['sd_drop_pct']:g} %"}
-        if several:
-            notes.append("SMS 3-sigma: the combines are not harmonised (not part of the SMS sequence); per-machine "
-                         "tickets still level each combine when given")
+        if several and S["machines"]["harmonise"]:
+            notes.append("SMS 3-sigma with several combines: after the SMS sequence the combine factor "
+                         f"(machines.method {S['machines']['method']}) is computed on the kept points - an OCCD step "
+                         "after the cleaning, not part of SMS; a factor that passes its gates goes into Yld_Harm")
     else:
         # ---- cascade
         st = {"alive": np.ones(len(g), bool), "why": np.array([""] * len(g), dtype=object), "log": []}
@@ -2268,7 +2286,7 @@ def clean(path, S, C, log=print, source=None):
         R["sms3sigma"] = sms_R
     if aoi_R is not None:
         R["aoi"] = aoi_R
-    harmonise = several and S["machines"]["harmonise"] and not sms_run
+    harmonise = several and S["machines"]["harmonise"]
     g["_ymap"] = y_map.to_numpy(float)
 
     # ---- swept area and wet yield per record (level, sessions, machine means)
@@ -2417,17 +2435,14 @@ def clean(path, S, C, log=print, source=None):
     levels_m, validation, tests, ref, ticket_test = None, None, [], None, None
     minfo = {}
     applied = {m: 1.0 for m in machs}
-    if sms_run and several:
-        decision = {m: "not harmonised (SMS 3-sigma method)" for m in machs}
-        method = "not part of the SMS 3-sigma method: the combines are not harmonised"
-    else:
-        decision = {m: ("harmonisation switched off" if several and not harmonise else "reference") for m in machs}
-        method = ("harmonisation switched off in the settings" if several and not harmonise else
-                  "one combine: nothing to harmonise")
+    decision = {m: ("harmonisation switched off" if several and not harmonise else "reference") for m in machs}
+    method = ("harmonisation switched off in the settings" if several and not harmonise else
+              "one combine: nothing to harmonise")
     if harmonise:
-        log("  machine harmonisation ...")
-        tests, applied, decision, ref = machines_mod.harmonise(g, alive, y.to_numpy(float), moi_arr, Mset, warnings,
-                                                               info=minfo)
+        log(f"  combine factor (harvest layout and the four methods; method {Mset['method']}) ...")
+        tests, applied, decision, ref = machines_mod.combine_factors(g, alive, y.to_numpy(float), moi_arr, Mset,
+                                                                     width_m=width_m.to_numpy(float),
+                                                                     warnings=warnings, info=minfo)
         method = machines_mod.method_text(Mset)
         if tk is not None and not totals and ticket_cmp and Mset.get("ticket_confirms", True):
             # the grower's weight as a closure test: a significant, consistent paired factor above max_factor is
@@ -2435,6 +2450,7 @@ def clean(path, S, C, log=print, source=None):
             # decision are updated in place, the per-machine-weights warning withdrawn)
             ticket_test = machines_mod.ticket_closure(tests, applied, decision, ref, Mset, integ_by_machine,
                                                       ticket_cmp, warnings, notes)
+            machines_mod.light_after_closure(ticket_test, applied, decision, minfo, warnings)
     if totals:
         if not machine_basis and set(str(k) for k in totals) != set(machs):
             warnings.append(f"machines.totals_bu names {sorted(totals)} but the file names no combine (no machine "
@@ -2481,6 +2497,11 @@ def clean(path, S, C, log=print, source=None):
         R["machines"] = {"column": C["machine"], "basis": machine_basis or "one combine", "reference": ref,
                          "estimate": minfo.get("estimate"), "pairs": minfo.get("pairs") or [],
                          "unlinked": minfo.get("unlinked") or [],
+                         "method_requested": minfo.get("method_requested", Mset.get("method")),
+                         "method_used": minfo.get("method_used") or {}, "layout": minfo.get("layout") or [],
+                         "layout_class": minfo.get("layout_class") or {}, "light": minfo.get("light") or {},
+                         "methods": minfo.get("methods") or [], "adjacency_distance_m": minfo.get("D_m"),
+                         "after": ("the SMS 3-sigma sequence" if sms_run else "the OCCD cascade"),
                          "whole_field_ratio": whole, "whole_field_ratio_note": (
                              "map mean of the reference / map mean of the combine over the whole field: a diagnostic, "
                              "never applied (it mixes the machines with the ground each one cut)"),
@@ -2488,9 +2509,10 @@ def clean(path, S, C, log=print, source=None):
                          "n_points": {m: means[m]["n"] for m in machs}, "n_kept": {m: means[m]["n_kept"] for m in machs},
                          "means": means, "tests": tests, "factor_applied": applied, "decision": decision,
                          "per_machine_totals": levels_m, "validation": validation, "ticket_test": ticket_test,
-                         "source": step_source("machines", "Maldaner et al. 2016 (reference machine, one factor per "
-                                                           "machine); Chiocco & Wuestefeld 2019 (+/-10 % bound); "
-                                                           "gates: house method")}
+                         "source": step_source("machines", "Maldaner et al. 2016 (reference machine; machine, track and "
+                                                           "point factors); Carneiro & Shiratsuchi, LSU AgCenter "
+                                                           "(machine normalisation); Chiocco & Wuestefeld 2019 (+/-10 % "
+                                                           "bound); layout, gates and lights: house method")}
     g["Yld_Harm"] = y_map.values * harm.values
 
     # ---- level: scale ticket / integral of the processed set (yield x swept area over every processed record)

@@ -391,18 +391,32 @@ def dataset_source(name) -> str | None:
 
 
 DATASET_MACHINES_BASIS = "source in parentheses at the end of the dataset names"
+DATASET_VIN_BASIS = "dataset names that are combine VINs"
+VIN_RE = re.compile(r"^[A-HJ-NPR-Z0-9]{17}$")     # a vehicle / product identification number: 17 characters, no I O Q
+
+
+def dataset_vin(name) -> str | None:
+    """The dataset name itself when it is a VIN / PIN (17 letters and digits, at least one of each, no I, O or Q): a
+    John Deere export names every dataset after the combine that logged it (e.g. '1ABCD23EFGH456789')."""
+    v = str(name).strip().upper()
+    return v if (VIN_RE.match(v) and re.search(r"[A-Z]", v) and re.search(r"\d", v)) else None
 
 
 def dataset_machines(names):
     """(combine id per name, basis) when every dataset name ends with a source (dataset_source) and at least two
     sources differ: an SMS export that holds several monitors (a CNH card next to a Trimble display, two Case IH
-    displays); the id is the source. None otherwise: one source (every task '(GreenStar 4 Monitor)', a single display
-    serial) does not tell combines apart, and a name without a source leaves its combine unknown."""
+    displays); the id is the source. Else, when every dataset name is a VIN (dataset_vin) and at least two differ,
+    the VIN is the combine. None otherwise: one source (every task '(GreenStar 4 Monitor)', a single display serial)
+    does not tell combines apart, and a name without a source leaves its combine unknown."""
     names = pd.Series(names).astype(str)
-    src = {n: dataset_source(n) for n in names.unique()}
-    if any(v is None for v in src.values()) or len(set(src.values())) < 2:
-        return None
-    return names.map(src).to_numpy(dtype=object), DATASET_MACHINES_BASIS
+    uniq = names.unique()
+    src = {n: dataset_source(n) for n in uniq}
+    if not any(v is None for v in src.values()) and len(set(src.values())) >= 2:
+        return names.map(src).to_numpy(dtype=object), DATASET_MACHINES_BASIS
+    vin = {n: dataset_vin(n) for n in uniq}
+    if not any(v is None for v in vin.values()) and len(set(vin.values())) >= 2:
+        return names.map(vin).to_numpy(dtype=object), DATASET_VIN_BASIS
+    return None
 
 
 def resolve_groups(g, C: dict, P: dict, src_format: str | None, session_keys=None) -> tuple:
@@ -419,7 +433,8 @@ def resolve_groups(g, C: dict, P: dict, src_format: str | None, session_keys=Non
         n_machines, mbasis = int(pd.Series(machine_key).nunique()), f"machine column {C['machine']!r}"
     elif "_machine" in g and g["_machine"].nunique() > 1:
         machine_key = g["_machine"].astype(str).to_numpy()
-        n_machines, mbasis = int(pd.Series(machine_key).nunique()), DATASET_MACHINES_BASIS
+        dmb = dataset_machines(ds) if ds is not None else None
+        n_machines, mbasis = int(pd.Series(machine_key).nunique()), (dmb[1] if dmb else DATASET_MACHINES_BASIS)
     elif ds is not None and dataset_serials(ds):
         ser = ds.map(lambda s: SERIAL_RE.search(s).group(1)).to_numpy()
         machine_key, n_machines, mbasis = ser, len(set(ser)), "display serial in the dataset names"

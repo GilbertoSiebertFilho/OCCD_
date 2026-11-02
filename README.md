@@ -13,7 +13,11 @@ shapefile. A **field of interest** (boundary or trial design) keeps only the fie
 export holds several fields, and the run reports the **harvest sessions** (days / combines), the **moisture basis**
 and the **combine harmonisation** so that the yield column mapped in DIFM is the right one.
 
-Owner: Gilberto Siebert Filho, Olds College Smart Farm (OFPE). App version 2.4.1 (2.4.1 = 2.4.0 with the fixes of its deploy review: a field saved
+Owner: Gilberto Siebert Filho, Olds College Smart Farm (OFPE). App version 2.6.0 (2.6 = the **combine factor** after the
+cleaning with a choice of method - paired cells, machine x machine, track x track, point x point or auto - chosen
+from how the combines shared the field (interleaved passes, mixed, blocks), also after the SMS 3-sigma sequence,
+combines told apart by dataset names that are VINs, and a new look for the app: section *Several combines*;
+2.5 = KML / KMZ point exports, combines from the dataset names, the combine network; 2.4.1 = 2.4.0 with the fixes of its deploy review: a field saved
 before v2.4 opens with its result as the previous run, the flow-delay scan's axis is a step-3 choice, the app reloads
 the engine on any changed file; 2.4 = the overlap filter F8 on the strip
 the header swept between two readings, placed by `Y_Offset`, with its threshold read on the pass interiors against
@@ -188,7 +192,7 @@ each run (`engine.run.recommended_yield_column`).
 |---|---|---|
 | One combine, one day, no scale ticket (a plain run) | `Yld_Vol_Dr` (the dry yield as the monitor mapped it) | - |
 | A harvest over several days or sessions, or many readings below the standard moisture under one-sided shrink (the run says "map Yld_Dry_Sy ... keep Harv_Day as a block": > 2 moisture points between sessions, or > 20 % of the readings below the standard) | `Yld_Dry_Sy` (wet yield x (100 - M) / (100 - standard moisture), the symmetric dry-matter basis) | `Harv_Day` as a block (and `Session` to audit) |
-| Several combines and a harmonisation factor **applied** (paired cells, or per-combine weighed totals) | `Yld_Harm` (mapped dry yield x each combine's factor; 1 where the difference was not proven). It wins over `Yld_Dry_Sy`, which carries no combine factor; keep `Harv_Day` as a block when the sessions also asked for it | - |
+| Several combines and a harmonisation factor **applied** (the method of `machines.method`, auto = paired cells; or per-combine weighed totals) | `Yld_Harm` (mapped dry yield x each combine's factor; 1 where the difference was not proven). It wins over `Yld_Dry_Sy`, which carries no combine factor; keep `Harv_Day` as a block when the sessions also asked for it | - |
 | Several combines, no factor applied (difference not proven, too few pairs, or > 10 %: "request per-machine weights") | `Yld_Vol_Dr`, or `Yld_Dry_Sy` when the sessions recommend it; give the per-combine weights (`--machine-total VIN=BU`) to level each combine to its own ticket, or the grower's field weight (below): when it confirms the factor above 10 %, the factor is applied | `Machine` as a block if DIFM allows it |
 | **The grower's weight given** (`--scale-ticket 1500000 --ticket-unit lb`; the app's Corrections tab): L = weight / monitor total of the processed set | the **leveled** column is the real yield: `Yld_Lvl_Sy` (= `Yld_Dry_Sy` x factor x L) when the sessions recommend the symmetric basis, else `Yld_Level` (= mapped dry yield x factor x L). The note reads "leveled to the grower's weight 1,500,000 lb (L = 0.948): the bu/ac now sum to the scale" | `Harv_Day` as a block when the sessions asked for it |
 | A trial design given as the field of interest | the column above | `Plot_Id` and `Tgt_Rate` (point-in-polygon from the design; empty outside the plots) to check the design against the harvest before the DIFM run |
@@ -237,7 +241,9 @@ the previous pass cut the SD by more than 25 %. Mean and SD are recomputed on th
 computed per task when several combines cut the field, pooled when one did (`--sms-group` forces it). The outputs are
 named `<tag>_sms3s_*`; the DIFM-ready file is written as SMS exports it after the swath step (the narrowed points
 carry the optimised width in the width column and scaled yields; `Wdth_Raw` and `Swath_Scl` are added), so it is
-mapped like an SMS export.
+mapped like an SMS export. With several combines the combine factor of `machines.method` follows the SMS sequence, as
+in the OCCD run (an OCCD step after the cleaning, not part of SMS): a factor that passes its gates goes into `Yld_Harm`
+(section *Several combines*).
 
 `--method both` cleans the same readings with both methods: the OCCD outputs in `output/` (the DIFM-ready and flagged
 shapefiles byte-identical to an OCCD-only run; its cleaning JSON adds `method = both` and a `methods` block with the
@@ -506,10 +512,44 @@ of a Case IH / Ag Leader display (`26/09/20-18:19:28 (219741)`) or the maker of 
 every dataset name ends with a source and two or more sources differ, each source is one combine for the
 harmonisation, the F8 local controls and the sessions (`machines.from_dataset`, default true; in the app the switch
 *Tell the combines apart by the dataset names* of the Combines tab, shown when the file holds two or more sources).
+A John Deere export whose dataset names are the combines' VINs (17 letters and digits) is read the same way.
 One source (every task of a GreenStar 4 export, a single display serial) is one combine and the file is cleaned
 exactly as before. A 2026 wheat export of four monitors (two display serials, a CNH card and a Trimble display, 97,719
 points, no machine column): one display reads 2.5 % below the reference at 30 m (factor 1.025, CI 1.004-1.044, 571
 cells / 90 pass pairs) and at 50 m (1.026) and is harmonised; the CNH and Trimble data stay at 1 (CIs include 1).
+
+**When and how (v2.6).** The factor is a step on the kept points **after the cleaning**, the OCCD cascade or the SMS
+3-sigma sequence alike. It first measures **how the combines shared the field**: for every pair, the share of each
+combine's passes with >= 10 kept points within 1.5 header widths of the other combine (adjacency, the mean of the two)
+and the share of the 100 m squares both cut (mixing). Adjacency >= 50 % = **interleaved passes**, 10-50 % = **mixed**,
+< 10 % = **blocks** (each combine cut its own part), 0 = no contact. Then it computes the factor of every combine by
+**four methods** and reports them all, each with a traffic light for that layout: the **paired cells** below (green on
+interleaved and mixed passes, yellow in blocks), **track x track** (every pair of adjacent passes, one of each combine,
+compares its yield along the common edge; all pairs together; green interleaved and mixed, yellow in blocks), **point x
+point** (every point against the nearest point of the other combine; green interleaved, yellow mixed, red in blocks)
+and **machine x machine** (the whole-field mean of each combine, the factor of Maldaner et al. 2016 and the per-machine
+normalisation of the LSU AgCenter, Carneiro & Shiratsuchi 2022; green only on interleaved passes, yellow mixed, red in
+blocks, where it mixes the machine with the ground each combine cut). `machines.method` (app: *How to compute the
+factor*) chooses the factor applied: **auto** (default) = the paired cells where the combine met another on interleaved
+or mixed passes and **no factor** in blocks or without contact (then only the grower's weight levels the field), or one
+method forced (`cells`, `track`, `point`, `machine`; an applied factor with a yellow or red light says so in its
+decision, a red one also in the warnings). Track and point use the same pairing population (kept points with <= 2 %
+overlap, same plot), the network of neighbouring combines, the spatial check and the gates as the cells, without the
+cell-size agreement; machine x machine has the gates without the spatial check. The evidence (the engine itself on
+pseudo-combines: 484 splits of 11 single-combine data sets of 6 fields into A / B by 10 harvest layouts, with B x 1.00,
+1.03, 1.05 and 1.10, so the true factor is known):
+
+| Harvest layout (splits) | Paired cells | Track x track | Point x point | Machine x machine |
+|---|---|---|---|---|
+| Interleaved (308): 90 % of the estimates within / max error | 3.5 % / 5.0 % | 4.1 % / 8.8 % | 4.1 % / 7.7 % | 4.9 % / 11.0 % |
+| Interleaved: false factor at k = 1 / true factor applied at k = 1.03-1.05 | 3/77 / 73/154 | 5/77 / 85/154 | 5/77 / 103/154 | 5/77 / 75/154 |
+| Mixed (116): applied factors, 90 % within / false factors | 3.1 % / 0/29 | 2.0 % / 0/29 | 5.4 % / 2/29 | 5.0 % / 4/29 |
+| Blocks (44): applied factors | none (gates) | none (gates) | 2, one 13 % off | 20, up to 14 % off; 2/11 false |
+
+On the 2026 wheat export of four monitors (above) the pairs are interleaved (adjacency 58 %) or mixed (22-51 %) and
+auto keeps the paired cells (1.0268 on one display, the others at 1); machine x machine would give 1.0375, track
+1.0233, point 1.0200 for that display. A two-combine wheat trial with the combines named by VIN, each cutting its own
+half (adjacency 2 %): no factor by auto; machine x machine reads 0.896 (red light, and above the 10 % gate).
 
 The reference is the combine with the most kept points (`machines.reference`, or an id; a reference whose records
 the cascade removed falls back to it with a warning). **Every pair of combines** is compared on 30 m and 50 m cells
@@ -539,7 +579,7 @@ as a factor below 1 on combine A. Means per combine (area, wet bu, mass per area
 with the tests, with the share of each combine's kept records left out by the overlap rule. Settings: `machines =
 {harmonise true, reference "auto", totals_bu, min_pairs 30, min_pass_pairs 5, ci 0.95, min_factor 0.01, max_factor
 0.10, same_plot_only true, bootstrap_reps 1000, seed 2026, pair_max_overlap 0.02, from_dataset true, network true,
-spatial_check true}`. The app takes the grower's weight of the whole field only (Corrections tab); per-combine totals
+spatial_check true, method "auto"}`. The app takes the grower's weight of the whole field only (Corrections tab); per-combine totals
 can still be given in a settings file or on the CLI. On a seed-rate trial the gate is
 underpowered without the design (adjacent passes carry different rates): give the design.
 
