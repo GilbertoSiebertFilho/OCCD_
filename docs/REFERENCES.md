@@ -18,7 +18,7 @@ House convention: lag scan after the cascade and the removal guardrails: house r
 
 ## Field of interest (plan / boundary) - pre-step
 
-Citation string (`cite("aoi")`): Menegatti & Molin 2004 (Points outside the field boundary deleted as step 1, before any other filter: 0.1-7.8 % in 5 of 6 monitors); Owen et al. 2024 (Out-of-boundary blocks must go before automated cleaning: they bias every computed filter value); Edge et al. 2024 (DIFM drops the design's headland polygon; units are 12-20 m of pass within one rate: what Plot_Id feeds); the cut before the cleaning (the app: at the boundary, 0 m; the engine / CLI: a 50 m buffer), plan detection from >= 4 similar polygons and the headland as the polygon > 5 x the median area: house rules
+Citation string (`cite("aoi")`): Menegatti & Molin 2004 (Points outside the field boundary deleted as step 1, before any other filter: 0.1-7.8 % in 5 of 6 monitors); Owen et al. 2024 (Out-of-boundary blocks must go before automated cleaning: they bias every computed filter value); Edge et al. 2024 (DIFM drops the design's headland polygon; units are 12-20 m of pass within one rate: what Plot_Id feeds); house cut before the cleaning (the app: at the boundary, 0 m; the engine / CLI: a 50 m buffer), plan detection from >= 4 similar polygons and the headland as the polygon > 5 x the median area: house rules
 
 | Work | Supports | What the work gives | DOI |
 |---|---|---|---|
@@ -26,7 +26,7 @@ Citation string (`cite("aoi")`): Menegatti & Molin 2004 (Points outside the fiel
 | Owen et al. 2024 | method | Out-of-boundary blocks must go before automated cleaning: they bias every computed filter value | [10.17504/protocols.io.4r3l2qmy3l1y/v1](https://doi.org/10.17504/protocols.io.4r3l2qmy3l1y/v1) |
 | Edge et al. 2024 | concept | DIFM drops the design's headland polygon; units are 12-20 m of pass within one rate: what Plot_Id feeds | [10.31219/osf.io/n9rgu](https://doi.org/10.31219/osf.io/n9rgu) |
 
-House convention: the cut before the cleaning (the app: at the boundary, 0 m; the engine / CLI: a 50 m buffer), plan detection from >= 4 similar polygons and the headland as the polygon > 5 x the median area: house rules
+House convention: house cut before the cleaning (the app: at the boundary, 0 m; the engine / CLI: a 50 m buffer), plan detection from >= 4 similar polygons and the headland as the polygon > 5 x the median area: house rules
 
 ## F0 Record integrity
 
@@ -209,11 +209,11 @@ House convention: sessions, the Ms inference, the shrink test and the discontinu
 
 ## Several combines - harmonisation
 
-Citation string (`cite("machines")`): Maldaner et al. 2016 (reference = combine with largest area; others x one ratio from all points, the one pair of closest paths or the point pairs on it; nearest combine corrected first; judged by SD / CV and variograms (no weight); proceedings, not refereed); Chiocco & Wuestefeld 2019 (multi-harvester gain searched within +/- 10 % on nearest points of adjacent paths: OCCD's 10 % cap); Gauci et al. 2023 (calibrated monitors <= 1.7 % off wagon, platforms alike (p >= 0.54): a step under OCCD's 1 % is noise); pairing, bootstrap and gates: house method (combines = the machine column, else the sources in parentheses at the end of the dataset names when two or more differ; every pair of combines with >= 30 cells and >= 5 pass pairs solved together by weighted least squares on the log ratios; one factor must fit both halves of the field (within 5 % or not significant); reference = the combine with most kept points, Maldaner et al. 2016 use the largest area; pairs on records <= 2 % overlapped in 30 / 50 m cells with >= 5 points of each machine; >= 30 cells and >= 5 pass pairs; 1,000-rep pass-pair bootstrap with both 95 % CIs excluding 1; 30 / 50 m factors within 2 %; 1 % floor; above 10 % nothing applied and per-machine weights requested; ticket closure 1 %, 3 x; 5 % ticket-vs-paired warning)
+Citation string (`cite("machines")`): Maldaner et al. 2016 (largest-area combine = reference; one ratio from all points or closest paths; nearest combine corrected first); Chiocco & Wuestefeld 2019 (multi-harvester gain searched within +/- 10 % on nearest points of adjacent paths: OCCD's 10 % cap); Gauci et al. 2023 (calibrated monitors <= 1.7 % off wagon, platforms alike (p >= 0.54): a step under OCCD's 1 % is noise); pairing, bootstrap and gates: house method (combines = the machine column, else the sources in parentheses at the end of the dataset names when two or more differ; every pair of combines with >= 30 cells and >= 5 pass pairs solved together by weighted least squares on the log ratios; one factor must fit both halves of the field (within 5 % or not significant); reference = the combine with most kept points, Maldaner et al. 2016 use the largest area; pairs on records <= 2 % overlapped in 30 / 50 m cells with >= 5 points of each machine; >= 30 cells and >= 5 pass pairs; 1,000-rep pass-pair bootstrap with both 95 % CIs excluding 1; 30 / 50 m factors within 2 %; 1 % floor; above 10 % nothing applied and per-machine weights requested; ticket closure 1 %, 3 x; 5 % ticket-vs-paired warning)
 
 | Work | Supports | What the work gives | DOI |
 |---|---|---|---|
-| Maldaner et al. 2016 | method | reference = combine with largest area; others x one ratio from all points, the one pair of closest paths or the point pairs on it; nearest combine corrected first; judged by SD / CV and variograms (no weight); proceedings, not refereed | no DOI |
+| Maldaner et al. 2016 | method | largest-area combine = reference; one ratio from all points or closest paths; nearest combine corrected first | no DOI |
 | Chiocco & Wuestefeld 2019 | range | multi-harvester gain searched within +/- 10 % on nearest points of adjacent paths: OCCD's 10 % cap | no DOI |
 | Gauci et al. 2023 | range | calibrated monitors <= 1.7 % off wagon, platforms alike (p >= 0.54): a step under OCCD's 1 % is noise | [10.1007/s11119-023-10092-y](https://doi.org/10.1007/s11119-023-10092-y) |
 

@@ -572,19 +572,19 @@ the same quantity the *Worth checking* advice uses: <= 1 % a small level correct
 after a field calibration, 3-10 % "the yield monitor's calibration should be checked", > 10 % "check the ticket
 coverage before trusting L". Both percentages are named with their direction: Trial 19 reads "the monitor total is
 -9.9 % from the grower's weight (L = 1.1099 is +11.0 % from 1, > 10 %)". The level the app and the report show first
-is the one applied to the columns (1.0007 on the 5-combine field, "before the combine harmonisation 0.9481"). With per-combine
+is the one applied to the columns (0.9975 on the 5-combine field, "before the combine harmonisation 0.9481"). With per-combine
 tickets the verdict bands the field-level gap (sum of the tickets / integral) and says that each combine is leveled
 to its own ticket. **The closure test for combines.** A proven paired factor above `machines.max_factor`
 (10 %) is normally reported, not applied. With a grower's weight the run computes the monitor total with that factor
 applied: when it closes with the weight within `machines.ticket_close_tol` (1 %) while the unharmonised total is
 more than 3 x that away, the weight confirms the factor and it is applied ("applied: the paired factor is above
-max_factor but the grower's weight confirms it (harmonised total within 0.07 % of the scale)"; switch
+max_factor but the grower's weight confirms it (harmonised total within 0.25 % of the scale)"; switch
 `machines.ticket_confirms`). A factor above the gate whose CI includes 1 at one cell size or whose 30 m / 50 m
 estimates disagree is not a candidate: the decision and the ticket test both say so ("candidate A rejected: the 30 m
 and 50 m factors disagree (1.2135 vs 1.2803)"), and when the weight sits nearer that combine's level than the
-reference's the test suggests `machines.reference = A`. The 5-combine field: combine E read 27.8 % high (factor 0.7825,
-CI 0.762-0.803, 396 cells), beyond the 10 % gate; with the factor the harmonised total is V' bu, 0.07 % from
-the scale, so the factor is applied and the final L is 1.0007; the other four combines (CIs including 1) are
+reference's the test suggests `machines.reference = A`. The 5-combine field: combine E read 25.8 % high (factor 0.7950,
+CI 0.780-0.812, 1,187 cells), beyond the 10 % gate; with the factor the harmonised total is V' bu, 0.25 % from
+the scale, so the factor is applied and the final L is 0.9975; the other four combines (CIs including 1) are
 unchanged. The app shows the test in the Combines tab (totals without / with the factor against the scale) and the
 report in its Level section.
 **When NOT to trust L**: the ticket covers several fields or only part of this one (check the coverage before
