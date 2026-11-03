@@ -136,6 +136,7 @@ def open_input(paths, workdir: str, copy_folders: bool = False, log=print) -> de
     roots = detect.unpack(paths, free_input_dir(workdir), copy_folders=copy_folders, log=log)
     c = detect.detect(roots)
     c.roots = list(roots)              # kept for the saved field (engine/fields.py): detect(roots) reopens the input
+    prepare_candidates(c, workdir, log=log)
     for x in c:
         log("found: " + x["label"])
     for n in c.notes:
@@ -143,6 +144,44 @@ def open_input(paths, workdir: str, copy_folders: bool = False, log=print) -> de
     if c.message:
         log(c.message)
     return c
+
+
+def prepare_candidates(cands, workdir: str, log=print):
+    """Mark the Ops Center section-element exports among cands (engine.formats.ops_sections: one point per header
+    element and second): "sections" True and a label that says so. Cheap (a sample of the records); the collapse
+    itself waits for use_candidate, so that a zip of several large exports only collapses the one chosen."""
+    from engine.formats import ops_sections
+    for x in cands:
+        if x.get("kind") != "export" or x.get("source_path"):
+            continue
+        try:
+            if ops_sections.is_section_export(x["path"]):
+                x["sections"] = True
+                x["label"] = (f"Point export · {os.path.basename(x['path'])} · {x['n']:,} section points (one per "
+                              "header element and second: read as one reading per combine and second)")
+        except Exception as e:          # reported, never fatal: the export is read as it is
+            cands.notes.append(f"{os.path.basename(x['path'])}: section check failed ({type(e).__name__}: {e})")
+
+
+def use_candidate(cand: dict, workdir: str, log=print) -> dict:
+    """The candidate ready to read: a section-element export (prepare_candidates) is collapsed to its per-second
+    readings once per work folder, into workdir/sections/<stem>_per_second.shp (made again when the source is newer),
+    and the candidate points at that file ("source_path" keeps the export). Updates cand in place and returns it."""
+    if not cand.get("sections") or cand.get("source_path"):
+        return cand
+    from engine.formats import ops_sections
+    import pyogrio
+    src = cand["path"]
+    out = os.path.join(workdir, "sections", os.path.splitext(os.path.basename(src))[0] + "_per_second.shp")
+    if not (os.path.exists(out) and os.path.getmtime(out) >= os.path.getmtime(src)):
+        log(f"{os.path.basename(src)}: one point per header section, collapsing to one reading per second ...")
+        ops_sections.collapse(src, out, log=log)
+    info = pyogrio.read_info(out)
+    n = int(info["features"])
+    cand.update({"source_path": src, "path": os.path.abspath(out), "n": n, "columns": list(info["fields"]),
+                 "label": f"Point export · {os.path.basename(src)} · {cand['n']:,} section points → {n:,} readings "
+                          "(one per combine and second)"})
+    return cand
 
 
 def list_units(candidate: dict) -> list:
@@ -1098,29 +1137,82 @@ def _quiet(_msg):
     return None
 
 
-def _unit_positions(candidate: dict, unit_id: str, opts, workdir: str, log=_quiet):
-    """(lon, lat) arrays of one unit's readings, decoded once and cached in workdir/decoded/aoi_cache/<id>.npz.
-    A unit that cannot be decoded (ValueError: unknown crop, no reading ...) caches an empty pair."""
+def _unit_readings(candidate: dict, unit_id: str, opts, workdir: str, log=_quiet):
+    """(lon, lat, area_ac) arrays of one unit's readings, decoded once and cached in
+    workdir/decoded/aoi_cache/<id>.npz; area_ac = Distance_f x Swth_Wdth_, the strip each reading swept (NaN without
+    them). A unit that cannot be decoded (ValueError: unknown crop, no reading ...) caches empty arrays; a cache
+    written before the area was kept is decoded again."""
     import hashlib
     d = os.path.join(workdir, "decoded", "aoi_cache")
     os.makedirs(d, exist_ok=True)
     f = os.path.join(d, hashlib.md5(unit_id.encode("utf-8")).hexdigest() + ".npz")
     if os.path.exists(f):
         z = np.load(f)
-        return z["lon"], z["lat"]
+        if "area" in z.files:
+            return z["lon"], z["lat"], z["area"]
     mod = detect.decoder(candidate["decoder"])
     root = candidate["probe"].root
     try:
         df, _ = mod.decode(root, [unit_id], opts, log=_quiet)
-        ok_df = df is not None and len(df) > 0
-        lon = pd.to_numeric(df["lon"], errors="coerce").values.astype(float) if ok_df else np.array([])
-        lat = pd.to_numeric(df["lat"], errors="coerce").values.astype(float) if ok_df else np.array([])
+        n = len(df) if df is not None else 0
+
+        def num(c):
+            return pd.to_numeric(df[c], errors="coerce").values.astype(float) if n and c in df else np.full(n, np.nan)
+        lon, lat = num("lon"), num("lat")
+        area = num("Distance_f") * num("Swth_Wdth_") / common.SQFT_PER_AC
     except (ValueError, KeyError) as e:
         log(f"unit {unit_id}: not decodable for the AOI check ({e})")
-        lon, lat = np.array([]), np.array([])
+        lon, lat, area = np.array([]), np.array([]), np.array([])
     ok = np.isfinite(lon) & np.isfinite(lat)
-    np.savez(f, lon=lon[ok], lat=lat[ok])
-    return lon[ok], lat[ok]
+    np.savez(f, lon=lon[ok], lat=lat[ok], area=area[ok])
+    return lon[ok], lat[ok], area[ok]
+
+
+def _unit_positions(candidate: dict, unit_id: str, opts, workdir: str, log=_quiet):
+    """(lon, lat) arrays of one unit's readings (_unit_readings without the area)."""
+    lon, lat, _ = _unit_readings(candidate, unit_id, opts, workdir, log=log)
+    return lon, lat
+
+
+def raw_readings(candidate: dict, units, opts, workdir: str, log=_quiet) -> pd.DataFrame:
+    """The raw data as it is, for the app's raw-data and field-of-interest maps: lon, lat (WGS 84), area_ac, unit (id),
+    field (the monitor's field name) and machine of every reading of the latest season's units (Unit.default; older
+    seasons are left out, as in units_inside_aoi). Shares the positions cache of units_inside_aoi: one decode per unit
+    and work folder."""
+    opts = opts if opts is not None else detect.default_options(candidate["decoder"])
+    parts = []
+    for u in units:
+        if not u.default:
+            continue
+        lon, lat, area = _unit_readings(candidate, u.id, opts, workdir, log=log)
+        log(f"unit {u.id}: {len(lon):,} readings")
+        if len(lon):
+            parts.append(pd.DataFrame({"lon": lon, "lat": lat, "area_ac": area, "unit": u.id,
+                                       "field": u.field or "(no field)", "machine": str(u.machine or "")}))
+    if not parts:
+        return pd.DataFrame(columns=["lon", "lat", "area_ac", "unit", "field", "machine"])
+    return pd.concat(parts, ignore_index=True)
+
+
+def export_readings(shp: str) -> pd.DataFrame:
+    """Every point of a point export as lon, lat (WGS 84), area_ac (distance x width, or speed x duration x width, as
+    the engine does; NaN without them) and group (the dataset column, else the machine column; '' without one), for
+    the app's raw-data and field-of-interest maps."""
+    import pyogrio
+    fields = list(pyogrio.read_info(shp)["fields"])
+    det = yield_clean.detect_columns(fields)
+    dcol, wcol, scol, tcol = det.get("distance_ft"), det.get("width_ft"), det.get("speed_mph"), det.get("duration_s")
+    gcol = det.get("dataset") or det.get("machine")
+    g = pyogrio.read_dataframe(shp, columns=[c for c in dict.fromkeys([dcol, wcol, scol, tcol, gcol]) if c])
+    if g.crs is not None and not g.crs.equals("EPSG:4326"):
+        g = g.to_crs("EPSG:4326")
+    nan = np.full(len(g), np.nan)
+    num = lambda c: pd.to_numeric(g[c], errors="coerce").to_numpy(float) if c else nan  # noqa: E731
+    dist = num(dcol) if dcol else (num(scol) * 1.46667 * num(tcol) if scol and tcol else nan)
+    out = pd.DataFrame({"lon": g.geometry.x.values, "lat": g.geometry.y.values,
+                        "area_ac": dist * num(wcol) / common.SQFT_PER_AC,
+                        "group": g[gcol].astype(str).values if gcol else ""})
+    return out[np.isfinite(out["lon"].to_numpy()) & np.isfinite(out["lat"].to_numpy())].reset_index(drop=True)
 
 
 def units_inside_aoi(candidate: dict, units, aoi_union, opts, workdir: str, buffer_m: float = AOI_BUFFER_M,
@@ -1347,6 +1439,7 @@ def _cli(a) -> int:
             raise ValueError(f"{len(cands)} datasets were found (listed above): choose one with --candidate N")
     if cand is None:
         return 0
+    use_candidate(cand, work, log=lambda m: _print("  " + m))
     units = list_units(cand) if cand["kind"] == "raw" else []
     plan = None
     if a.aoi:

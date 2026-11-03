@@ -18,7 +18,7 @@ cleaning with a choice of method - paired cells, machine x machine, track x trac
 from how the combines shared the field (interleaved passes, mixed, blocks), also after the SMS 3-sigma sequence,
 combines told apart by dataset names that are VINs, and a new look for the app: section *Several combines*;
 2.5 = KML / KMZ point exports, combines from the dataset names, the combine network; 2.4.1 = 2.4.0 with the fixes of its deploy review: a field saved
-before v2.4 opens with its result as the previous run, the flow-delay scan's axis is a step-3 choice, the app reloads
+before v2.4 opens with its result as the previous run, the flow-delay scan's axis is a step-5 choice, the app reloads
 the engine on any changed file; 2.4 = the overlap filter F8 on the strip
 the header swept between two readings, placed by `Y_Offset`, with its threshold read on the pass interiors against
 local no-overlap controls of the same combine at the same distance from the harvested edge, and never below 5 %; the
@@ -80,15 +80,29 @@ stops and asks for `--candidate N`. Each call unpacks into its own `input/` (`in
 reused), so a reused `--out` never picks up an earlier input. Exit codes: 0 done, 2 a problem the user can fix (the
 message says what), 3 an unexpected error (the traceback is written to `<out>/error_<time>.log`).
 
-## The four steps of the app
+## The six steps of the app
 
-1. **Input.** Upload files (a zip, the `.shp` + `.shx` + `.dbf` + `.prj` (+ `.cpg`) of an export, or raw monitor
+1. **Raw data.** Upload files (a zip, the `.shp` + `.shx` + `.dbf` + `.prj` (+ `.cpg`) of an export, or raw monitor
    files), or type a file or folder on this computer and press *Open*. A folder on this computer is read in place
    (nothing is copied), which is the fast way for a whole monitor card. Zips are unpacked recursively (a zip of
-   per-combine zips is fine). The app lists what it recognised; when there are several datasets, choose one.
-   **Field of interest (optional):** upload the boundary or the trial design of the field (`.shp` zip, `.geojson`,
-   `.gpkg`, `.kml`, `.kmz`, any coordinate system) or pick the example (Trial 29 trial design). The app shows polygons / plots / headland polygons / area and the rate column found.
-2. **Decode** (raw data only). Pick the field and the units (tasks, machines or loads; the most recent season is
+   per-combine zips is fine). The app lists what it recognised; when there are several datasets, choose one (none is
+   read before the choice). Under the input the app shows **the raw data as it is**: the readings, the area harvested
+   (the strips the readings swept, added up: overlaps count twice), the field names the monitor recorded (a raw card)
+   or the datasets (an export), the units and machines, and a map coloured by field or dataset with a legend (readings
+   and acres of each). For a raw card every unit of the latest season is decoded once for its positions (the cache
+   that step 4 reuses; older seasons are counted, not drawn). An Ops Center export with one point per header section
+   is first collapsed to one reading per combine and second (*Ops Center section exports* below).
+2. **Boundary or trial design** (optional). Upload the boundary or the trial design of the field (`.shp` zip,
+   `.geojson`, `.gpkg`, `.kml`, `.kmz`, any coordinate system), type its path, or pick the example (Trial 29 trial
+   design). The app shows polygons / plots / headland polygons / area, the plot id and rate columns, and **the
+   polygons as they are** on a map: the plots filled by target rate (the rates in a legend, light to dark), the
+   headland grey, the field outlined.
+3. **Field of interest.** The raw data minus what lies outside the boundary: only the field to be cleaned. The step
+   shows the readings inside the boundary (+ the cleaning buffer of step 5, 0 m by default) and their share of the
+   raw data, the area harvested inside, **the field or trial area**, the plots and, for a raw card, the units the
+   boundary selects (step 4 pre-selects the same ones), with the map of those readings and the outline. Without a
+   boundary the step says so: step 4 then takes the field by the name the monitor recorded.
+4. **Decode** (raw data only). Pick the field and the units (tasks, machines or loads; the most recent season is
    pre-selected; with a field of interest the units are pre-selected by their share of readings inside it and the
    table shows that share; a selection of several seasons or crops must be confirmed), the crop (default: the
    monitor's, shown next to the box; a different crop also replaces the monitor's test weight and standard moisture
@@ -98,7 +112,7 @@ message says what), 3 an unexpected error (the traceback is written to `<out>/er
    per-machine table, the records not exported and why, the calibration and validation notes, the decoder warnings
    and a map (with the field outline when one is loaded). For an export, this step shows the points, the columns and
    the column mapping found.
-3. **Cleaning.** Crop (prefilled from the decoder or the export's Product column; it sets the F1 moisture window),
+5. **Cleaning.** Crop (prefilled from the decoder or the export's Product column; it sets the F1 moisture window),
    column mapping (prefilled; required columns marked `*`), the 13 filters in four groups, each with its switch, its
    thresholds, its rule and **the literature behind it (one line under the filter; the *References* popover lists
    the full citations with their DOI)**, and the corrections in tabs: flow delay; *Field of interest* (processing
@@ -111,7 +125,7 @@ message says what), 3 an unexpected error (the traceback is written to `<out>/er
    standard, default), the **SMS 3-sigma** sequence (the steps done by hand in SMS: clip, Optimize Swath Widths, then
    speed, moisture and dry yield within mean +/- 3 SD; its options are in the *SMS 3-sigma* tab) or **Both, and
    compare** (section *The SMS 3-sigma method* below).
-4. **Run and download.** *Run cleaning* (with the *Field name* box beside it) streams the log, then shows a compact
+6. **Run and download.** *Run cleaning* (with the *Field name* box beside it) streams the log, then shows a compact
    summary: the metrics readings in / kept / removed % / mean yield of the DIFM column / the level factor (only when
    a weight was given, with "monitor 38,613 bu vs scale 36,608 bu (-5.2 %)" under it) / the DIFM column, one line
    with the F8 threshold, the flow delay and the records dropped outside the field, the warnings and the checks worth
@@ -129,8 +143,22 @@ message says what), 3 an unexpected error (the traceback is written to `<out>/er
    result and the SMS 3-sigma result. Changing a setting after a run hides that result until the cleaning is
    run again. The decoder's warnings, the source and the checks are written into the cleaning JSON and PDF.
 
+**Ops Center section exports.** Ops Center can export a harvest as one point per header element (section) and
+second: about 0.5 ft wide, about 90 a second for a 45 ft header (Trial 16, 2026: 1,621,051 points). Read as they are,
+neighbouring sections would count as consecutive readings (passes, steps, strips and overlap measured across the
+header instead of along the travel) and the map strips would be smaller than a pixel. The app and the CLI recognise
+such an export (a section column, and records drawn at random that share their combine and second; an export ordered
+by section is recognised too) and collapse the chosen one, once per work folder, into
+`sections/<name>_per_second.shp`: width = the sections with an area added up, capped at the header; distance = the
+area-weighted mean (the area is kept); yields, wet mass, moisture and dry matter = area-weighted means; position =
+the header centre; the other columns from the first section; `N_Elem` = the sections of each reading
+(`engine/formats/ops_sections.py`). A second without an area is dropped, as SMS drops a zero-area record. Checked
+against the collapse imported into SMS for Trials 16 and 17: 21,517 readings, 129.14 ac, 33.00 bu/ac and 129,181
+readings, 546.71 ac, 82.97 bu/ac, the same per combine.
+
 Every opened input gets its own work folder `workspace/<YYYYmmdd-HHMMSS>_<tag>/` with `input/` (uploads and unpacked
-zips), `decoded/` (`<tag>_decoded.zip` and `<tag>_decode_report.json`) and `output/` (one folder per cleaning run:
+zips), `sections/` (an Ops Center section export collapsed per second), `decoded/` (`<tag>_decoded.zip` and
+`<tag>_decode_report.json`) and `output/` (one folder per cleaning run:
 `output`, `output_2`, ...); uploaded field files go to `workspace/aoi_uploads/`. A full run writes about 120 MB for a
 33,000-point field: delete old run folders when they are no longer needed. Set the environment variable
 `YIELD_APP_WORKSPACE` to put the work folders elsewhere.
@@ -150,11 +178,11 @@ rewrites `field.json`).
 
 The **Saved fields** block at the top of the sidebar lists the saved runs (name · date · crop; the caption under the buttons gives the
 readings in and kept) with *Open*, *Rename* and *Delete*. *Open* restores the whole screen from the saved files **without running the engine
-again**: the input, the decoded data, the field of interest (outline and plot tagging), the step-3 settings and the
-processing tree as they were used, and the result of step 4 (metrics, downloads, report and figures). A field cleaned
+again**: the input, the decoded data, the field of interest (outline and plot tagging), the step-5 settings and the
+processing tree as they were used, and the result of step 6 (metrics, downloads, report and figures). A field cleaned
 before v2.4 opens with the v2.4 settings on the screen and its result marked as the previous run: it was cleaned
 with the v2.3 overlap model, which those settings would not repeat; the page says so, and the (v2.3) choices of
-step 3 make it current again (*The overlap model of v2.4* below). A reopened
+step 5 make it current again (*The overlap model of v2.4* below). A reopened
 field can be run again (new outputs; `field.json` is updated). When the outputs are missing (the folder was moved
 or deleted outside the app) the app says so once and *Run cleaning* rebuilds them with the restored settings (for a field cleaned before
 v2.4 the page adds that those settings carry the v2.4 model unless the (v2.3) choices are set). *Delete* asks for confirmation and removes that
@@ -372,7 +400,7 @@ synthesis of the tests in Portuguese, `SINTESE_testes_ABC_pt.md`):
   for display only: no total is computed over them.
 
 **To reproduce a cleaning delivered before v2.4** (every cleaning up to v2.3), run it with the v2.3 model,
-`yield_clean.LEGACY_V23`. In the app: step 3's choices marked (v2.3), that is F8's footprint *chord rectangle* and
+`yield_clean.LEGACY_V23`. In the app: step 5's choices marked (v2.3), that is F8's footprint *chord rectangle* and
 reference *whole no-overlap band*, its *Y_Offset* off and its floor 0, and under *Flow-delay correction* *Passes the
 delay scan compares* = *east-west first*. From the command line: these settings saved as a file and passed with
 `--settings`:
@@ -682,7 +710,7 @@ as the delivered Trial 29 cleaning did (10 %). The 8.7 % drop of the 0-2 % band 
   the local day). Units are split by season (one JD-Data tree can hold several years); a gap of up to 10 s in the
   moisture channel holds the last value, as Ops Center does.
 - **John Deere GreenStar 3:** one display and one S680 combine; the 14 s grain-flow and 18 s moisture delays reproduce
-  the SMS processing of those logs (editable in step 2). The receiver-to-header offset is whatever was entered on the
+  the SMS processing of those logs (editable in step 4). The receiver-to-header offset is whatever was entered on the
   display. Without the `.fdr` files the loads are named by GUID. Time is UTC. The monitor's crop profile is used unless
   a crop is chosen: the wheat logs of one field carry "Canola P1530 G" (52.01 lb/bu, 10 %) with a median moisture of
   14.3 %; the decoder warns when a unit's median moisture is more than 2 points above the profile's standard.

@@ -743,7 +743,7 @@ COLUMN_ALIASES = {
     "yield": ["Yld_Vol_Dr", "VRYIELDVOL", "Yld_Vol_Dry", "Yield_Dry", "DryYield", "Yield_bu_ac", "Yield"],
     "yield_wet": ["Yld_Vol_We", "Yld_Vol_Wet", "Yield_Wet", "WetYield", "WETVOLUME"],
     "moisture": ["Moisture__", "Moisture", "Moist", "Moisture_pct", "GrainMoist"],
-    "speed_mph": ["Speed_mph_", "Speed_mph", "VEHICLSPEED", "VEHICSPEED", "Speed"],
+    "speed_mph": ["Speed_mph_", "Speed_mph", "VEHICLSPEED", "VEHICLSPEE", "VEHICSPEED", "Speed"],
     "distance_ft": ["Distance_f", "Distance_ft", "DISTANCE", "Dist_ft"],
     "width_ft": ["Swth_Wdth_", "Swath_Width", "SwathWidth", "SWATHWIDTH", "Swth_Wdth", "Width_ft", "Width"],
     "heading": ["Track_deg_", "Track_deg", "Hding_Veh_", "Heading", "Track", "Direction", "Course"],
