@@ -45,6 +45,13 @@ On a new computer: copy this folder (the `workspace/` with the saved fields is o
 and double-click `install_occd.bat`, which creates a private environment `.venv` here and installs
 `requirements.txt`; `run_app.bat` uses that environment when it exists. `INSTALAR.txt` has the steps in Portuguese.
 
+To update an installed copy to the newest version on GitHub: close the app and double-click `atualizar_app.bat`. It
+downloads the `main` branch (the repository is public), moves the current `app`, `engine`, `docs`, `assets` and
+`.streamlit` folders and the root files to `_backup\<date-time>`, puts the new ones in their place, checks that the
+code compiles and puts the previous version back on any failure; the saved fields (`workspace`), the environment
+(`.venv`), `_archive` and `examples` are never touched, and it says when `install_occd.bat` must run again (the
+packages changed).
+
 After an update of the app's files, refresh the browser page: the running app re-imports the changed code (app.py compares the time and size of every file of `engine/` and of `app/brand.py` with the ones it imported and reloads them when any differs, also when a restored backup puts older times back; Streamlit itself only reloads `app/`). Only a change to `.streamlit/config.toml` (the theme) needs the app closed and started again, and so does going back to 2.4.0 or older: their app.py reloads the engine only for newer files, so close the app before copying the old files and start it again after.
 
 The same work runs from the command line, from the input to the DIFM-ready zip:

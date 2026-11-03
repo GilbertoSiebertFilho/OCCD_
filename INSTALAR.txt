@@ -1,4 +1,4 @@
-OCCD - Olds College Cleaning Data 2.4.1 - instalação num computador novo
+OCCD - Olds College Cleaning Data 2.6.0 - instalação num computador novo
 ========================================================================
 
 1. Extraia o zip (botão direito > Extrair tudo) e ponha a pasta "App limpeza DIFM" num disco LOCAL, por exemplo
@@ -16,6 +16,12 @@ OCCD - Olds College Cleaning Data 2.4.1 - instalação num computador novo
 
 4. Dê dois cliques em run_app.bat. O app abre no navegador em http://localhost:8501
    (a janela preta precisa ficar aberta enquanto você usa o app; fechar a janela fecha o app).
+
+ATUALIZAR uma instalação que já existe (uma vez instalado, é só isto)
+   Feche o app e dê dois cliques em atualizar_app.bat. Ele baixa a versão mais nova do GitHub, guarda a versão atual
+   em _backup\<data-hora>, põe a nova no lugar e confere o código; se algo falhar, volta a versão anterior sozinho.
+   Os campos salvos (workspace) e o ambiente Python (.venv) não são mexidos. Se os pacotes do Python mudarem, ele
+   avisa para rodar install_occd.bat uma vez. A pasta _backup pode ser apagada quando quiser.
 
 Os seus campos salvos (pasta workspace) não vêm neste pacote: o computador novo começa com a lista vazia.
 Para levar um campo, copie a pasta dele de workspace\ do computador antigo para workspace\ do novo; o app o lista
