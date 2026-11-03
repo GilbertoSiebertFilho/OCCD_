@@ -867,7 +867,7 @@ Every cleaning delivered up to v2.3 used the v2.3 overlap and flow-delay model. 
  "lag_stage": "output", "lag_axis": "ew_first"}
 ```
 
-In the app every switch is in step 3: the F8 choices marked (v2.3) with Y_Offset off and the floor 0, and *Passes the
+In the app every switch is in step 5: the F8 choices marked (v2.3) with Y_Offset off and the floor 0, and *Passes the
 delay scan compares* = *east-west first (v2.3)* under *Flow-delay correction*. From the command line, save it as a
 file and pass it with `--settings` (merged into the defaults like any settings file; put the other settings of the
 delivered run in the same file); from Python,

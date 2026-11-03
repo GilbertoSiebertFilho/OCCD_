@@ -167,11 +167,11 @@ TICKET_UNIT_LABEL = {"lb": "lb", "kg": "kg", "bu": "bu", "t": "t (metric)"}
 # the engine's machines settings know the ticket closure test (machines.ticket_confirms) in a v2 ticket engine
 ENGINE_TICKET_CONFIRMS = "ticket_confirms" in (yc.DEFAULT_SETTINGS.get("machines") or {})
 # the processing tree of the sidebar: the filters in execution order, grouped; the switches own the on/off state
-# (keys f_<id>_on, lag_auto, harmonise, add_sym) that the settings of step 3 read
+# (keys f_<id>_on, lag_auto, harmonise, add_sym) that the settings of step 5 read
 TREE_GROUPS = [("Sensor & record", ["F0", "F1", "F2", "F3", "F4"]), ("Pass structure", ["F5", "F6", "F7"]),
                ("Overlap", ["F8"]), ("Yield outliers", ["F9", "F10", "F11"]), ("Short runs", ["F5b"])]
 TREE_OFF_NOTE = "off — switch it on in the processing tree"
-# the step-3 tab that holds each group of the tree (a group heading of the tree opens that tab)
+# the step-5 tab that holds each group of the tree (a group heading of the tree opens that tab)
 TREE_TAB = {"Sensor & record": "Sensor & record", "Pass structure": "Pass structure", "Overlap": "Overlap",
             "Yield outliers": "Yield outliers", "Short runs": "Pass structure", "Corrections": "Corrections",
             "Combines": "Combines", "Sessions & moisture": "Sessions & moisture", "SMS 3-sigma": "SMS 3-sigma"}
@@ -185,7 +185,7 @@ HIDE = getattr(er, "AOI_HIDE_SHARE", 0.01)
 BUFFER_M = getattr(er, "AOI_BUFFER_M", 50.0)
 # the app cuts the records at the boundary itself before the cleaning (the preview keeps every raw reading): the 50 m
 # buffer of the engine / CLI took in the edge passes of the neighbouring fields (Trial 25: two canola tasks of the
-# fields east and south in the cascade, its F10 limits and the sessions); a buffer stays an option in step 3
+# fields east and south in the cascade, its F10 limits and the sessions); a buffer stays an option in step 5
 AOI_CUT_M = 0.0
 # cleaning methods (engine settings["method"]): the OCCD cascade, the SMS 3-sigma sequence (engine/clean/sms3sigma.py),
 # or both on the same readings and a comparison (engine/clean/compare.py)
@@ -246,14 +246,14 @@ brand.inject()                                           # the page's small CSS,
 # ------------------------------------------------------------------------------------------------ session state
 ss = st.session_state
 # data keys (not widgets). field_saved = the work folder whose field.json matches this screen's last run (None when
-# nothing was saved yet); field_fresh = that record still matches the settings on the page (set in step 4);
+# nothing was saved yet); field_fresh = that record still matches the settings on the page (set in step 6);
 # field_request = ("open" | "delete", workdir) from the sidebar, processed at the top of the page before any widget.
 SS_DEFAULTS = {"workdir": None, "cands": None, "open_log": [], "open_error": None, "open_exc": None,
                "open_request": None, "units": {}, "decoded": None, "result": None, "result_shp": None,
                "result_key": None, "aoi": None, "aoi_request": None, "aoi_error": None, "aoi_exc": None,
                "aoi_shares": {}, "aoi_preselect": None, "input_source": None, "field_saved": None,
                "field_record": None, "field_fresh": False, "field_request": None, "field_notice": None,
-               "field_name_auto": None, "restored_units": None, "run_started": None}
+               "field_name_auto": None, "restored_units": None, "run_started": None, "raw": {}}
 for k, v in SS_DEFAULTS.items():
     ss.setdefault(k, v)
 
@@ -290,6 +290,12 @@ def swath_preview(path: str, mtime: float, ycol, width_ft=None, y_offset=True) -
     return p
 
 
+@st.cache_data(max_entries=8, show_spinner="Reading the points of the export ...")
+def export_readings(path: str, mtime: float) -> pd.DataFrame:
+    """Every point of a point export with its swept area and dataset (engine.run.export_readings): steps 1 and 3."""
+    return er.export_readings(path)
+
+
 def strip_count_text(n_drawn: int, n_file: int) -> str:
     """'N readings', plus 'of M (a random sample)' only when preview_swaths sampled (M above its cap), else the
     readings without a position that are not drawn."""
@@ -313,7 +319,7 @@ def crop_of_export(path: str, mtime: float):
 @st.cache_data(max_entries=8, show_spinner=False)
 def tw_of_file(path: str, mtime: float):
     """The file's own test weight (median Yld_Mass_W / Yld_Vol_We, lb/bu; None without the columns): converts the
-    grower's weight to bushels for the caption of step 3 (the engine makes the same conversion)."""
+    grower's weight to bushels for the caption of step 5 (the engine makes the same conversion)."""
     return er.file_test_weight(path)
 
 
@@ -344,7 +350,7 @@ def f9_in_bu(p: dict, has_mass: bool, tw_given, tw_file, crop_key) -> str:
 
 @st.cache_data(show_spinner=False)
 def moisture_median(path: str, mtime: float, col: str):
-    """Median of the export's moisture column (None when it cannot be read): the 'set the crop' check of step 3."""
+    """Median of the export's moisture column (None when it cannot be read): the 'set the crop' check of step 5."""
     try:
         import pyogrio
         v = pd.to_numeric(pyogrio.read_dataframe(path, columns=[col], read_geometry=False)[col], errors="coerce")
@@ -360,7 +366,7 @@ def mtime(p: str) -> float:
 
 @st.cache_data(max_entries=16, show_spinner=False)
 def yield_mean_of(path, mtime: float, col):
-    """The mean of the DIFM column over the kept points (the 'Mean yield' metric of step 4)."""
+    """The mean of the DIFM column over the kept points (the 'Mean yield' metric of step 6)."""
     return ef.yield_mean(path, col)
 
 
@@ -418,7 +424,7 @@ def clear_aoi():
 # A widget that stays on the page across a rerun must be ASSIGNED its new value, never deleted: Streamlit sends a value
 # to the browser only for a key the script set (set_value); a deleted key leaves the browser's old value in place and
 # the next interaction sends it back, so the server falls back to the stale value one rerun later. The tree switches,
-# the two path boxes and the saved-fields selectbox are always on the page; the step-3 inputs are when an input is
+# the two path boxes and the saved-fields selectbox are always on the page; the step-5 inputs are when an input is
 # open. AppTest rebuilds the widgets from the server's state and cannot see the difference, so the browser is the
 # only check of this rule.
 def reset_tree_switches():
@@ -428,9 +434,9 @@ def reset_tree_switches():
 
 
 def reset_settings():
-    """'Reset to house standard' (a callback, so it runs before the widgets are drawn): every step-3 input and tree
+    """'Reset to house standard' (a callback, so it runs before the widgets are drawn): every step-5 input and tree
     switch back to its default. The defaults of the inputs whose default depends on the file (crop and its F1 window,
-    column mapping, output name) were recorded while step 3 was drawn (ss.step3_defaults); the per-machine totals
+    column mapping, output name) were recorded while step 5 was drawn (ss.step3_defaults); the per-machine totals
     editor cannot be set through the session state and is remounted with a new key (mt_nonce)."""
     for k, v in (ss.get("step3_defaults") or {}).items():
         ss[k] = copy.deepcopy(v)
@@ -444,7 +450,7 @@ def start_over():
     defaults again. Nothing on disk is touched: the saved fields stay. Used inline (before the widgets are drawn) and
     as a button callback; dialog_done tells a dialog body to rerun the whole page. The widgets that stay on the page
     (tree switches, path boxes, the saved-fields selectbox) are assigned their default, not deleted (see above); the
-    step-3 inputs leave the page with the input and may be deleted; the uploaders and the totals editor are remounted
+    step-5 inputs leave the page with the input and may be deleted; the uploaders and the totals editor are remounted
     with a new key."""
     keep = {"upload_nonce": ss.get("upload_nonce", 0) + 1, "mt_nonce": ss.get("mt_nonce", 0) + 1,
             "saved_field": ss.get("saved_field")}
@@ -462,7 +468,7 @@ def start_over():
 
 def is_dirty() -> bool:
     """An input is open and its state is not saved: opened / decoded / settings changed without a completed run, or
-    the settings changed after the last save (field_fresh is set in step 4 on every run of the page)."""
+    the settings changed after the last save (field_fresh is set in step 6 on every run of the page)."""
     return ss.cands is not None and not bool(ss.get("field_fresh"))
 
 
@@ -492,7 +498,7 @@ def run_key_of(shp: str, settings: dict, aoi_path: str | None) -> str:
 
 
 PRE_V24_NOTE = ("This field was cleaned before v2.4 (OCCD {version}), with the v2.3 overlap model. Run cleaning cleans it "
-                "with the v2.4 model, the settings on the screen. To repeat the v2.3 cleaning instead, set step 3's "
+                "with the v2.4 model, the settings on the screen. To repeat the v2.3 cleaning instead, set step 5's "
                 "(v2.3) options of F8 and of the flow-delay scan, F8's Y_Offset off and its floor 0 (F8 switched off in "
                 "the tree: switch it on to change them, then off again; README: 'The overlap model of v2.4').")
 
@@ -515,7 +521,7 @@ def v23_settings(S: dict) -> dict:
     """The saved settings of a field cleaned before v2.4 with the LEGACY_V23 value of every v2.4 key they lack: what
     produced its result. Its run key then differs from the v2.4 defaults the page shows and the result is 'previous
     run' (before, the v2.4 defaults filled the gaps and an old result passed for a current one); the (v2.3) choices of
-    step 3 give the same key again. lag_axis only with the flow-delay correction on: off, the axis changes no number
+    step 5 give the same key again. lag_axis only with the flow-delay correction on: off, the axis changes no number
     (only the scan's figure) and its widget is disabled."""
     S = copy.deepcopy(S)
     F = S.get("filters") if isinstance(S.get("filters"), dict) else {}
@@ -558,7 +564,7 @@ def default_field_name(aoi, tag) -> str:
 
 
 def seed_field_name(aoi, tag):
-    """The 'Field name' box of step 4 follows the default (the field of interest's name, else the output name) until
+    """The 'Field name' box of step 6 follows the default (the field of interest's name, else the output name) until
     the user types a name of their own (field_name_auto None); must run before the widget is drawn."""
     d = default_field_name(aoi, tag)
     if "field_name" not in ss:
@@ -633,7 +639,7 @@ def _float(v, default=None):
 
 
 def step3_guesses(D, shp: str):
-    """The crop and the standard moisture that step 3 proposes: from the decoder (its options, else the crop its
+    """The crop and the standard moisture that step 5 proposes: from the decoder (its options, else the crop its
     calibration used), else from the export's product column."""
     crop_guess, std_m_guess = None, None
     if D:
@@ -660,7 +666,7 @@ def default_tag(cand, D) -> str:
 
 
 def step3_defaults(shp: str, det: dict, fields: list, crop_guess, tag: str) -> dict:
-    """Every step-3 input key with its house default for this file: the filters' thresholds, the F8 mode, the crop
+    """Every step-5 input key with its house default for this file: the filters' thresholds, the F8 mode, the crop
     and its F1 window, the column mapping as detected, the corrections, the field-of-interest buffer, the moisture
     basis and the combines. 'Reset to house standard' assigns them (reset_settings) and Open starts from them before
     the saved settings are laid over (apply_settings_to_widgets): every key is assigned, so a value left in the
@@ -692,7 +698,7 @@ def step3_defaults(shp: str, det: dict, fields: list, crop_guess, tag: str) -> d
 
 
 def sms_widget_defaults() -> dict:
-    """The house defaults of the method selector and the SMS 3-sigma inputs of step 3."""
+    """The house defaults of the method selector and the SMS 3-sigma inputs of step 5."""
     return {"clean_method": "occd", "s3_group": SMS_D.get("group_by", "auto"), "s3_k": float(SMS_D.get("k_sd", 3.0)),
             "s3_drop": float(SMS_D.get("sd_drop_pct", 25.0)), "s3_passes": int(SMS_D.get("max_yield_passes", 5)),
             "s3_clip": True, "s3_swath": True, "s3_scale": True, "s3_speed": True, "s3_moist": True, "s3_yield": True,
@@ -700,9 +706,9 @@ def sms_widget_defaults() -> dict:
 
 
 def apply_settings_to_widgets(S: dict, shp: str, rec: dict, D, cand):
-    """Write the saved settings into the widget keys of step 3 (and the tree switches) before the widgets are drawn,
+    """Write the saved settings into the widget keys of step 5 (and the tree switches) before the widgets are drawn,
     so that the page shows what the saved run used and recomputes the same settings (the result is then not
-    'previous run'). Every step-3 key is assigned, the house default where the record says nothing (a key left alone
+    'previous run'). Every step-5 key is assigned, the house default where the record says nothing (a key left alone
     would keep the browser's value from the input that was on the screen before). A saved value of the wrong type
     falls back to the default. The per-machine totals of the data editor cannot be set through the session state."""
     SK = key_of(shp)
@@ -712,7 +718,7 @@ def apply_settings_to_widgets(S: dict, shp: str, rec: dict, D, cand):
     W = step3_defaults(shp, det, fields, step3_guesses(D, shp)[0], default_tag(cand, D))
     crop_key = S.get("crop") if S.get("crop") in common.CROPS else None
     lo, hi = F1_CROP_RANGES.get(crop_key, F1_DEFAULT_RANGE)
-    # the F1 window of the saved crop; f_F1_crop marks it so that the crop seed of step 3 does not overwrite it
+    # the F1 window of the saved crop; f_F1_crop marks it so that the crop seed of step 5 does not overwrite it
     W.update({"f_F1_min_pct": float(lo), "f_F1_max_pct": float(hi), "f_F1_crop": crop_key,
               f"crop_clean_{SK}": crop_key or CROP_UNKNOWN})
     F = S.get("filters") if isinstance(S.get("filters"), dict) else {}
@@ -836,6 +842,8 @@ def _restore_field(rec: dict, workdir: str):
         return
     cands = detect.detect(roots)
     cands.roots = list(roots)
+    if hasattr(er, "prepare_candidates"):             # Ops Center section exports: the per-second readings again
+        er.prepare_candidates(cands, workdir, log=log)
     for x in cands:
         log("found: " + x["label"])
     for n in cands.notes:
@@ -886,7 +894,7 @@ def _restore_field(rec: dict, workdir: str):
                 ss.restored_units = list(inp["units"])
         else:
             ss.field_notice = ("info", "The decoded data of this field is not in its folder any more: decode it "
-                                       "again in step 2, then run the cleaning.")
+                                       "again in step 4, then run the cleaning.")
     else:
         shp = cand["path"]
     A = rec.get("aoi") if isinstance(rec.get("aoi"), dict) else {}
@@ -936,7 +944,7 @@ def _restore_field(rec: dict, workdir: str):
     if cleaned_before_v24(rec, R, S):
         S = v23_settings(S)
         ss.field_notice = ("info", PRE_V24_NOTE.format(version=rec.get("app_version") or "older")
-                           + " Its result counts as the previous run: step 4 hides it while the settings on the "
+                           + " Its result counts as the previous run: step 6 hides it while the settings on the "
                              "screen differ from the ones that cleaned it.")
     try:
         merged = yc.merge_settings(er.compat_settings(S, shp=shp)[0])
@@ -1155,15 +1163,15 @@ def do_rename(wd: str):
 
 
 def goto_tab(label: str):
-    """A group heading of the tree: opens that tab of step 3 (st.tabs is re-created with this default; the nonce makes
+    """A group heading of the tree: opens that tab of step 5 (st.tabs is re-created with this default; the nonce makes
     the same heading work twice in a row)."""
     ss.step3_tab, ss.step3_nonce = label, ss.get("step3_nonce", 0) + 1
 
 
 def tree_heading(gname: str):
-    """A bold group heading of the tree that opens the matching step-3 tab."""
+    """A bold group heading of the tree that opens the matching step-5 tab."""
     st.button(f"**{gname}**", type="tertiary", on_click=goto_tab, args=(TREE_TAB[gname],),
-              key=f"tree_grp_{key_of(gname)}", help=f"Opens the '{TREE_TAB[gname]}' tab of step 3")
+              key=f"tree_grp_{key_of(gname)}", help=f"Opens the '{TREE_TAB[gname]}' tab of step 5")
 
 
 def filter_on(fid: str) -> bool:
@@ -1173,7 +1181,7 @@ def filter_on(fid: str) -> bool:
 
 
 def filter_params(fid: str) -> dict:
-    """The current thresholds of a filter from the step-3 inputs (session state), the house defaults when the inputs
+    """The current thresholds of a filter from the step-5 inputs (session state), the house defaults when the inputs
     are not on the page yet."""
     d0 = yc.DEFAULT_SETTINGS["filters"][fid]
     p = {k: ss.get(f"f_{fid}_{k}", v) for k, v in d0.items() if k not in ("on", "threshold")}
@@ -1184,7 +1192,7 @@ def filter_params(fid: str) -> dict:
 
 def short_rule(fid: str, p: dict) -> str:
     """The filter's name with its thresholds in a few words, for the switch labels of the processing tree
-    (e.g. 'Speed 1.5–6.5 mph'); the engine's describe_filter gives the full sentence used in step 3."""
+    (e.g. 'Speed 1.5–6.5 mph'); the engine's describe_filter gives the full sentence used in step 5."""
     name = yc.FILTER_INFO[fid]["name"]
     q = {**yc.DEFAULT_SETTINGS["filters"][fid], **{k: v for k, v in p.items() if v is not None}}
 
@@ -1219,7 +1227,7 @@ def short_rule(fid: str, p: dict) -> str:
 
 
 # what the processing tree shows; filled while the page is built, drawn by render_tree() at the end (or before a stop)
-TREE = {"input": None, "aoi": None, "result": None, "stale": False, "result3": None}
+TREE = {"input": None, "aoi": None, "foi": None, "decode": None, "result": None, "stale": False, "result3": None}
 # the engine switches a filter off itself when its column is missing ("no moisture column: F1 (moisture) switched off")
 ENGINE_OFF = "switched off"
 
@@ -1227,7 +1235,7 @@ ENGINE_OFF = "switched off"
 def tree_row(label: str, note: str, anchor: str | None = None, key: str | None = None, value: bool = True,
              help: str | None = None):
     """One line of the tree: a switch (or a caption when key is None) whose label carries the step and, after a run,
-    its note (" — removed 72"), with the link to its block in step 3 in a narrow column at the right. The note is in
+    its note (" — removed 72"), with the link to its block in step 5 in a narrow column at the right. The note is in
     the label on purpose: the sidebar is narrow, and a long label wraps inside its switch, whereas a second element on
     the row lands on a line of its own (a horizontal container wraps; a link inside the label is not an option, a
     click on it flips the switch). st.columns keeps the link on the line at any sidebar width; the columns stack only
@@ -1244,7 +1252,7 @@ def tree_row(label: str, note: str, anchor: str | None = None, key: str | None =
     if anchor:
         # the link's title is its tooltip and accessible description: the arrow alone says nothing to a screen reader
         title = re.sub(r"^:material/[a-z_]+:\s*", "", label).replace('"', "'")
-        c2.caption(f'[↗](#{anchor} "{title}: open in step 3")', text_alignment="right")
+        c2.caption(f'[↗](#{anchor} "{title}: open in step 5")', text_alignment="right")
 
 
 def run_notes(R, stale: bool) -> dict:
@@ -1287,7 +1295,7 @@ def run_notes(R, stale: bool) -> dict:
 
 def sms_tree_rows(R3, stale: bool):
     """The SMS 3-sigma steps in the processing tree (captions: the method has no switches there; its options are in
-    the SMS 3-sigma tab of step 3), with the removed counts of the last run."""
+    the SMS 3-sigma tab of step 5), with the removed counts of the last run."""
     rows = {r["filter"]: r for r in ((R3 or {}).get("cascade") or [])}
     names = [("S0", "Import check (SMS minimum yield)"), ("S1", "Clip to the field"), ("S2", "Optimize swath widths"),
              ("S3", "Speed mean ± k SD"), ("S4", "Moisture mean ± k SD"), ("S5", "Dry yield mean ± k SD")]
@@ -1318,7 +1326,7 @@ def render_tree():
     method = ss.get("clean_method") if ss.get("clean_method") in METHODS else "occd"   # the row groups to draw
     res_m = (R or {}).get("method") or "occd"                                            # what the shown result is
     R3 = TREE.get("result3") if res_m == "both" else (R if res_m == "sms3sigma" else None)
-    if R and res_m == "both" and R3 is None:              # a stale 'both' run: step 4 did not load its SMS result
+    if R and res_m == "both" and R3 is None:              # a stale 'both' run: step 6 did not load its SMS result
         R3 = methods_of(R)[0]
     notes = run_notes(R if res_m != "sms3sigma" else None, stale)
     with st.sidebar:
@@ -1326,12 +1334,17 @@ def render_tree():
         st.divider()
         st.subheader("Processing tree", anchor=False)
         st.caption("Switch on the filters to use; counts appear after a run.")
-        with st.expander("1 · Input", icon=":material/upload_file:"):
+        with st.expander("1 · Raw data", icon=":material/upload_file:"):
             st.caption(TREE["input"] or "nothing opened")
-        with st.expander("2 · Field of interest", icon=":material/map:"):
+        with st.expander("2 · Boundary", icon=":material/map:"):
             st.caption(TREE["aoi"] or "none")
-            st.caption("[go to field of interest](#field-of-interest)")
-        with st.expander("3 · Cleaning", expanded=True, icon=":material/tune:"):
+            st.caption("[go to the boundary](#boundary)")
+        with st.expander("3 · Field of interest", icon=":material/crop_free:"):
+            st.caption(TREE["foi"] or "no boundary: the whole field the monitor named")
+            st.caption("[go to the field of interest](#field-of-interest)")
+        with st.expander("4 · Decode", icon=":material/memory:"):
+            st.caption(TREE["decode"] or "nothing opened")
+        with st.expander("5 · Cleaning", expanded=True, icon=":material/tune:"):
             if R:
                 head = f"kept {R['n_kept']:,} of {R['n_in']:,} ({100 - R['removed_pct']:.1f} %)"
                 if res_m == "both":
@@ -1358,7 +1371,7 @@ def render_tree():
                                  anchor=fid.lower(), key=f"f_{fid}_on", value=d0["on"])
             tree_heading("Corrections")
             with st.container(gap=None):
-                # the label follows the step-3 controls through the session state, whether or not they are on the
+                # the label follows the step-5 controls through the session state, whether or not they are on the
                 # page and whether or not the switch is on; the engine shifts the positions by minus the records
                 # entered, so the label carries the same sign as the note after the run ("-3 rec")
                 if ss.get("lag_mode", "auto") == "fixed":
@@ -1395,7 +1408,7 @@ def render_tree():
             with st.container(gap=None):
                 tree_row("Symmetric dry yield column (Yld_Dry_Sy)", notes.get("add_sym", "") if ss.get("add_sym", True)
                          else ("off" if R else ""), anchor="moisture-basis", key="add_sym")
-        with st.expander("4 · Output", icon=":material/cloud_upload:"):
+        with st.expander("6 · Output", icon=":material/cloud_upload:"):
             if R and not stale:
                 name = os.path.basename((R.get("files") or {}).get("difm_ready_zip") or "")
                 st.caption(f"DIFM zip ready: {name} · {R['n_kept']:,} kept points")
@@ -1432,7 +1445,7 @@ def do_open(source):
         ss[k] = None
     ss.open_log = []
     ss.field_fresh = False
-    ss.cand_idx = 0                                       # assigned, not popped: the datasets box may stay on the page
+    ss.cand_idx = None                                    # assigned, not popped: the datasets box may stay on the page
     ss.pop("field_name", None)                            # the field name is seeded again for the new input (assigned
     ss.field_name_auto = None                             # by seed_field_name before the box is drawn)
     kind, val = source
@@ -1615,6 +1628,217 @@ def swath_map(pv: pd.DataFrame, aoi=None, height=380):
           height)
 
 
+# ------------------------------------------------------------------------------------------------ steps 1-3 maps
+# the raw data as it is (step 1), the boundary as it is (step 2) and the raw data inside the boundary (step 3). The
+# groups of the raw data (the monitor's fields of a card, the datasets of an export) get bright colours that read on
+# the satellite image; a group beyond the tenth reuses them
+GROUP_COLORS = ["#FFC20E", "#00E5FF", "#FF4FA3", "#76FF03", "#FF8F00", "#B388FF", "#FFFFFF", "#00B373", "#FF5252",
+                "#90A4AE"]
+RAW_MAP_N = 60000           # readings drawn on the maps of steps 1 and 3; above it a random sample of this size
+
+
+def group_colors(groups: pd.Series) -> dict:
+    """{group: hex}, the group with the most readings first."""
+    return {g: GROUP_COLORS[i % len(GROUP_COLORS)] for i, g in enumerate(groups.value_counts().index)}
+
+
+def rate_colors(rates) -> dict:
+    """{rate: hex} of the plots of a trial design, light to dark in the order of the rates."""
+    import matplotlib
+    cm = matplotlib.colormaps["YlGnBu"]
+    n = len(rates)
+    return {r: matplotlib.colors.to_hex(cm(0.25 + 0.7 * i / max(n - 1, 1))) for i, r in enumerate(rates)}
+
+
+def chips(items) -> None:
+    """A legend under a map: one coloured dot + bold name + text per (hex, name, text)."""
+    import html as _html
+    st.html('<div style="display:flex;flex-wrap:wrap">' + "".join(
+        f'<span style="display:inline-flex;align-items:center;gap:6px;margin:2px 16px 2px 0;font-size:0.86rem">'
+        f'<span style="width:12px;height:12px;border-radius:50%;background:{c};border:1px solid #1F2937"></span>'
+        f'<b>{_html.escape(str(name))}</b>{_html.escape(text)}</span>' for c, name, text in items) + "</div>")
+
+
+def group_legend(R: pd.DataFrame, gcol: str, colors: dict, empty_name: str) -> None:
+    """The legend of readings_map: each group's colour, name, readings and harvested area."""
+    g = R.groupby(gcol, sort=False).agg(n=("lon", "size"), ac=("area_ac", "sum"))
+    chips([(colors[k], k or empty_name, f" {int(g.at[k, 'n']):,} readings"
+            + (f" · {float(g.at[k, 'ac']):,.1f} ac" if float(g.at[k, "ac"]) > 0 else ""))
+           for k in colors if k in g.index])
+
+
+def readings_map(R: pd.DataFrame, gcol: str, colors: dict, aoi=None, height=400) -> None:
+    """Readings as points coloured by group over the satellite image (RAW_MAP_N at most, a random sample above it);
+    with aoi the boundary is outlined (plots navy, the field light blue)."""
+    P = R.sample(RAW_MAP_N, random_state=0) if len(R) > RAW_MAP_N else R
+    hexes = [colors[g] for g in P[gcol]]
+    if pdk is None:
+        st.map(pd.DataFrame({"lon": P["lon"].values, "lat": P["lat"].values, "color": hexes}), latitude="lat",
+               longitude="lon", color="color", size=2, height=height)
+        return
+    pts = pd.DataFrame({"lon": P["lon"].values, "lat": P["lat"].values, "rgb": _rgb(hexes, 220)})
+    out_layers, olon, olat = _outline_layers(aoi)
+    layers = [pdk.Layer("ScatterplotLayer", data=pts, get_position=["lon", "lat"], get_fill_color="rgb",
+                        get_radius=2, radius_min_pixels=1.5, radius_max_pixels=6, pickable=False)] + out_layers
+    _deck(layers, np.concatenate([pts.lon.values, olon]), np.concatenate([pts.lat.values, olat]), height)
+
+
+def boundary_map(aoi, height=400) -> None:
+    """The boundary or trial design as it is, over the satellite image: the plots filled by their target rate (light
+    to dark; light blue without a rate column), the headland / border polygons grey, the field outlined light blue;
+    the rates in a legend below."""
+    gdf = aoi["plan"]["gdf"]
+    g = gdf if (gdf.crs is None or gdf.crs.equals("EPSG:4326")) else gdf.to_crs("EPSG:4326")
+    head = np.asarray(getattr(aoi["plan"].get("plan"), "headland", np.zeros(len(g), bool)), bool)
+    head = head if len(head) == len(g) else np.zeros(len(g), bool)
+    rcol = aoi.get("rate_col") if aoi.get("n_plots") else None
+    rate = (pd.to_numeric(g[rcol], errors="coerce").to_numpy(float) if rcol and rcol in g
+            else np.full(len(g), np.nan))
+    ramp = rate_colors(sorted({float(r) for r in rate[np.isfinite(rate)]}))
+    polys = []
+    for geom, hd, r in zip(g.geometry.values, head, rate):
+        if geom is None or geom.is_empty:
+            continue
+        fill = ([144, 164, 174, 110] if hd else _rgb([ramp[float(r)]], 190)[0] if np.isfinite(r)
+                else [0, 156, 222, 80])
+        for p in (geom.geoms if geom.geom_type == "MultiPolygon" else [geom]):
+            polys.append({"polygon": [[float(x), float(y)] for x, y in zip(*p.exterior.coords.xy)], "rgb": fill})
+    out_layers, olon, olat = _outline_layers(aoi)
+    if pdk is None or not polys or not len(olon):
+        return
+    layers = [pdk.Layer("PolygonLayer", data=polys, get_polygon="polygon", get_fill_color="rgb", filled=True,
+                        stroked=False, pickable=False)] + out_layers
+    _deck(layers, olon, olat, height)
+    items = [(c, f"{r:g}", "") for r, c in ramp.items()]
+    if head.any():
+        items.append(("#90A4AE", "headland / border", ""))
+    if items:
+        chips(items)
+    st.caption((f"Plots coloured by **{rcol}** (light = low, dark = high); " if ramp else "")
+               + "the field outlined in light blue" + (", the plots in navy." if aoi.get("n_plots") else "."))
+
+
+def raw_data_block(cand) -> dict | None:
+    """Under the input of step 1: the raw data as it is (readings, area harvested, the monitor's fields or the
+    export's datasets, units, machines) and its map. Raw monitor data: every unit of the latest season is decoded once
+    for its positions (the cache that step 4's field-of-interest measure reuses); a point export: every point.
+    Returns {"R", "gcol", "colors", "raw"} for step 3, or None when nothing could be read."""
+    raw = cand["kind"] == "raw"
+    older = 0
+    if raw:
+        root = cand["probe"].root
+        if root not in ss.units:
+            with st.spinner("Listing the tasks / machines / loads ..."):
+                ss.units[root] = er.list_units(cand)
+        units = ss.units[root]
+        if not units:
+            return None                                   # step 4 says why
+        key = key_of(f"{root}|{ss.workdir}")
+        if key not in ss.raw:
+            with st.status("Reading the raw data (each unit of the latest season once) ...", expanded=True) as status:
+                try:
+                    ss.raw[key] = er.raw_readings(cand, units, detect.default_options(cand["decoder"]), ss.workdir,
+                                                  log=status.text)
+                    status.update(label=f"Raw data read: {len(ss.raw[key]):,} readings", state="complete",
+                                  expanded=False)
+                except Exception as e:                    # shown, never swallowed
+                    status.update(label="Reading the raw data failed", state="error")
+                    st.exception(e)
+                    ss.raw[key] = None
+        R, gcol, empty = ss.raw[key], "field", "(no field)"
+        older = sum(not u.default for u in units)
+    else:
+        try:
+            R = export_readings(cand["path"], mtime(cand["path"]))
+        except Exception as e:                            # shown, never swallowed; step 4 reads the file itself
+            st.exception(e)
+            R = None
+        gcol, empty = "group", "(one dataset)"
+    if R is None or R.empty:
+        if R is not None:
+            st.warning("No reading of the raw data has a position.", icon=":material/warning:")
+        return None
+    colors = group_colors(R[gcol])
+    area = float(np.nansum(R["area_ac"].to_numpy(float)))
+    with st.container(horizontal=True):
+        st.metric("Raw readings", f"{len(R):,}", border=True)
+        st.metric("Area harvested", f"{area:,.1f} ac" if area > 0 else "—", border=True,
+                  help="The strips the readings swept (distance x width), added up: overlapping passes count twice.")
+        if raw:
+            st.metric("Fields (monitor names)", f"{R['field'].nunique():,}", border=True)
+            st.metric("Units", f"{R['unit'].nunique():,}", border=True)
+            st.metric("Machines", f"{R['machine'].replace('', np.nan).nunique():,}", border=True)
+        else:
+            st.metric("Datasets", f"{R['group'].replace('', np.nan).nunique() or 1:,}", border=True)
+    readings_map(R, gcol, colors)
+    group_legend(R, gcol, colors, empty)
+    st.caption(("Every reading" if len(R) <= RAW_MAP_N else f"A random {RAW_MAP_N:,} of the {len(R):,} readings")
+               + f" of the raw data as it is, coloured by {'the field name the monitor recorded' if raw else 'dataset'}"
+               + (f"; {older:,} unit(s) of older seasons are not shown" if older else "") + ".")
+    TREE["input"] = f"{cand['label']} · {len(R):,} readings" + (f" · {area:,.1f} ac" if area > 0 else "")
+    return {"R": R, "gcol": gcol, "colors": colors, "raw": raw, "empty": empty}
+
+
+def foi_block(aoi, aoi_pending: bool, RAW) -> None:
+    """Step 3: the readings of the raw data inside the boundary (+ the cleaning buffer of step 5, 0 m by default; for
+    raw monitor data only the units the boundary selects, >= PRESELECT of their readings inside it + BUFFER_M, as
+    step 4 pre-selects them), the size of the field or trial and the map: what the cleaning will see."""
+    if aoi is None or aoi_pending:
+        st.info("Load a boundary or a trial design in step 2: the field of interest is the raw data inside it. Without "
+                "one, step 4 takes the field by the name the monitor recorded and cleans all of it.",
+                icon=":material/info:")
+        return
+    if RAW is None:
+        st.info("Open the raw data in step 1: the field of interest is the raw data inside the boundary.",
+                icon=":material/info:")
+        return
+    import shapely
+    R, gcol = RAW["R"], RAW["gcol"]
+    cut = _float(ss.get("aoi_buffer"))
+    cut = AOI_CUT_M if cut is None else cut
+    union = er.plan_union_wgs84(aoi["plan"])
+    poly = er.buffer_wgs84(union, cut)
+    shapely.prepare(poly)
+    lon, lat = R["lon"].to_numpy(float), R["lat"].to_numpy(float)
+    keep = shapely.contains_xy(poly, lon, lat)
+    chosen, n_units = None, None
+    if RAW["raw"]:
+        near = er.buffer_wgs84(union, BUFFER_M)
+        shapely.prepare(near)
+        share = pd.Series(shapely.contains_xy(near, lon, lat)).groupby(R["unit"].to_numpy()).mean()
+        chosen, n_units = set(share.index[share >= PRESELECT]), int(share.size)
+        keep &= R["unit"].isin(chosen).to_numpy()
+    F = R[keep]
+    trial = bool(aoi["n_plots"])
+    area = float(np.nansum(F["area_ac"].to_numpy(float)))
+    with st.container(horizontal=True):
+        st.metric("Readings inside", f"{len(F):,}", delta=f"{100 * len(F) / len(R):.1f} % of the raw data",
+                  delta_color="off", delta_arrow="off", border=True)
+        st.metric("Area harvested inside", f"{area:,.1f} ac" if area > 0 else "—", border=True,
+                  help="The strips the readings inside swept (distance x width), added up: overlaps count twice.")
+        st.metric("Trial area" if trial else "Field area", f"{aoi['area_ac']:,.1f} ac", border=True,
+                  help="The area of the boundary / trial-design polygons (step 2).")
+        if trial:
+            st.metric("Plots", f"{aoi['n_plots']:,}", border=True)
+        if chosen is not None:
+            st.metric("Units", f"{len(chosen):,} of {n_units:,}", border=True)
+    TREE["foi"] = (f"{len(F):,} readings inside · {aoi['area_ac']:,.1f} ac "
+                   + ("trial" if trial else "field"))
+    if F.empty:
+        st.error("No reading of the raw data lies inside the boundary: check that the boundary is this field.",
+                 icon=":material/error:")
+        return
+    readings_map(F, gcol, RAW["colors"], aoi)
+    group_legend(F, gcol, RAW["colors"], RAW["empty"])
+    n_out = len(R) - len(F)
+    st.caption(f"The raw data inside {cut_text(cut)}: the {n_out:,} reading{'' if n_out == 1 else 's'} outside it "
+               "(other fields, the neighbours' edges, roads) " + ("is" if n_out == 1 else "are")
+               + " left out before the cleaning"
+               + (f"; units with less than {100 * PRESELECT:.0f} % of their readings inside the field + {BUFFER_M:g} m "
+                  "are not taken (step 4 lists them)" if chosen is not None else "")
+               + ". The cleaning buffer beyond the boundary is in step 5, tab Field of interest.")
+
+
 # ------------------------------------------------------------------------------------------------ references
 def cite_line(step: str, fallback: str = "") -> str:
     """One line of sources for a step (engine.clean.references.cite without the notes; FILTER_INFO['source'] or
@@ -1669,7 +1893,7 @@ def sources_footer(step: str, fallback: str = "", prefix: str = "Sources: "):
 
 
 def references_expander(steps: list):
-    """The works cited by the enabled steps, in full, at the end of step 3."""
+    """The works cited by the enabled steps, in full, at the end of step 5."""
     with st.expander("References (works cited by the enabled steps)", icon=":material/menu_book:"):
         if rf is None:
             st.caption("The references module (engine/clean/references.py) is not available: the one-line sources of "
@@ -1688,10 +1912,10 @@ process_field_request()
 header()
 show_field_notice()
 
-# ------------------------------------------------------------------------------------------------ 1 input
+# ------------------------------------------------------------------------------------------------ 1 raw data
 with st.container(border=True, key="occd_step_1"):                # the key is the CSS hook of the step card (brand)
-    brand.step_header(1, "Input", "Upload the monitor files or the point export, or open a file or folder on this "
-                                  "computer")
+    brand.step_header(1, "Raw data", "Upload the monitor files or the point export, or open a file or folder on this "
+                                     "computer")
     ups = st.file_uploader("Upload files", accept_multiple_files=True, key=upload_key("uploads"),
                            help="A zip, the .shp + .shx + .dbf + .prj (+ .cpg) of a point export or its .kml / .kmz "
                                 "(SMS Export to Google Earth), or raw monitor files (a zipped .cn1 card folder, John "
@@ -1721,29 +1945,61 @@ with st.container(border=True, key="occd_step_1"):                # the key is t
             st.error(cands.message, icon=":material/help:")
         else:
             if len(cands) > 1:
+                # no default: a zip of several fields must not read the first one before the user chooses (Trial 16:
+                # the 7.5 M points of the neighbouring trial came first)
                 idx = st.selectbox("Several datasets were found: which one?", range(len(cands)),
-                                   format_func=lambda i: cands[i]["label"], key="cand_idx")
+                                   format_func=lambda i: cands[i]["label"], key="cand_idx",
+                                   placeholder="choose a dataset ...")
             else:
                 idx = 0
-            cand = cands[idx]
+            cand = cands[idx] if idx is not None else None
+        if cand is not None:
+            if cand.get("sections") and not cand.get("source_path") and hasattr(er, "use_candidate"):
+                # an Ops Center export with one point per header section: collapsed once (engine.formats.ops_sections)
+                with st.spinner("One point per header section: collapsing to one reading per combine and second ..."):
+                    try:
+                        er.use_candidate(cand, ss.workdir, log=ss.open_log.append)
+                    except Exception as e:                  # shown, never swallowed; the export is read as it is
+                        st.exception(e)
             icon = ":material/memory:" if cand["kind"] == "raw" else ":material/scatter_plot:"
             st.success(cand["label"], icon=icon)
             if cand["kind"] == "raw":
                 show_warnings(cand["probe"].warnings, "Notes from the format check")
         with st.expander("Details of the unpacking"):
             st.text("\n".join(ss.open_log + [f"note: {n}" for n in cands.notes]) or "nothing to report")
+    # ---- the raw data as it is: readings, area harvested, fields / datasets, and the map
+    RAW = None
+    if cand is not None and os.path.exists(cand.get("path") or cand["probe"].root):
+        RAW = raw_data_block(cand)
 
-    # ---- field of interest (optional): a boundary or a trial design
-    with st.container(border=True, key="aoi_block"):    # the key is the CSS hook of the smaller nested heading (brand)
+    # ---- example inputs (for testing): the paths of EXAMPLES / AOI_EXAMPLES that exist on this computer
+    ex_in = [(lab, p) for lab, p in EXAMPLES if os.path.exists(p)]
+    ex_aoi = [(lab, p) for lab, p in AOI_EXAMPLES if os.path.exists(p)]
+    if ex_in or ex_aoi:
+        with st.expander("Example inputs (for testing)", icon=":material/science:"):
+            with st.container(horizontal=True):
+                for lab, p in ex_in:
+                    st.button(lab, on_click=request_open, args=(("path", p),), icon=":material/dataset:",
+                              key=f"ex_{key_of(p)}")
+                for lab, p in ex_aoi:
+                    st.button(lab, on_click=request_aoi, args=(("path", p),), icon=":material/map:",
+                              key=f"aoi_ex_{key_of(p)}")
+
+# ------------------------------------------------------------------------------------------------ 2 boundary
+# optional: a field boundary or a trial design, as it is (the polygons, their counts and area, the map)
+with st.container(border=True, key="occd_step_2"):
+    with st.container(key="aoi_box"):
         if ss.aoi_request:                           # set by a callback (example / Load button) before this run
             req, ss.aoi_request = ss.aoi_request, None
-            with st.spinner("Reading the field of interest ..."):
+            with st.spinner("Reading the boundary ..."):
                 do_load_aoi(req)
-        st.subheader("Field of interest (optional)", anchor="field-of-interest")
-        st.caption("A boundary or trial-design polygon file. The raw data of a grower often holds more than one field: "
-                   f"with a field of interest the units are chosen by their readings inside it (+ {BUFFER_M:g} m), "
-                   "the records outside it are dropped before the cleaning, the DIFM file is clipped to it and a trial "
-                   "design adds Plot_Id / Tgt_Rate to the outputs.")
+        st.html('<div id="boundary"></div>')
+        brand.step_header(2, "Boundary or trial design", "Optional: the field's boundary or the trial-design "
+                                                         "polygons, as they are")
+        st.caption("The raw data of a grower often holds more than one field: the boundary picks the field (step 3). "
+                   f"The units are chosen by their readings inside it (+ {BUFFER_M:g} m), the records outside it are "
+                   "dropped before the cleaning, the DIFM file is clipped to it and a trial design adds Plot_Id / "
+                   "Tgt_Rate to the outputs.")
         aoi_ups = st.file_uploader("Upload a boundary or trial design", accept_multiple_files=True, type=AOI_TYPES,
                                    key=upload_key("aoi_uploads"),
                                    help="A zipped shapefile, .geojson, .gpkg, .kml / .kmz, or the .shp + .shx + .dbf + "
@@ -1797,7 +2053,8 @@ with st.container(border=True, key="occd_step_1"):                # the key is t
                     (f"boundary, polygon {fl_[0]} of {aoi.get('n_in_file')}" if len(fl_) == 1 else
                      f"boundary, polygons {', '.join(map(str, fl_))} of {aoi.get('n_in_file')} together")
                     if fl_ else "boundary")
-            st.success(f"Field of interest: {aoi['name']} ({kind}, {aoi.get('crs') or 'no CRS'})", icon=":material/map:")
+            st.success(f"{'Trial design' if aoi['n_plots'] else 'Boundary'}: {aoi['name']} ({kind}, "
+                       f"{aoi.get('crs') or 'no CRS'})", icon=":material/map:")
             with st.container(horizontal=True):
                 st.metric("Polygons", f"{aoi['n_polygons']:,}", border=True)
                 st.metric("Plots", f"{aoi['n_plots']:,}", border=True)
@@ -1807,39 +2064,35 @@ with st.container(border=True, key="occd_step_1"):                # the key is t
                 rates = ", ".join(f"{r:g}" for r in (aoi.get("rates") or []))
                 st.caption(f"Plot id column: **{aoi.get('id_col') or 'row index 1..n'}** · rate column: "
                            f"**{aoi.get('rate_col') or 'none found'}**" + (f" · rates found: {rates}" if rates else ""))
+            if not aoi_pending:
+                boundary_map(aoi)
             show_warnings(aoi.get("warnings"), "Notes on the field file")
         if aoi is not None:
             TREE["aoi"] = f"{aoi['name']}: {aoi['n_plots']:,} plots / {aoi['area_ac']:,.1f} ac"
 
-    # ---- example inputs (for testing): the paths of EXAMPLES / AOI_EXAMPLES that exist on this computer
-    ex_in = [(lab, p) for lab, p in EXAMPLES if os.path.exists(p)]
-    ex_aoi = [(lab, p) for lab, p in AOI_EXAMPLES if os.path.exists(p)]
-    if ex_in or ex_aoi:
-        with st.expander("Example inputs (for testing)", icon=":material/science:"):
-            with st.container(horizontal=True):
-                for lab, p in ex_in:
-                    st.button(lab, on_click=request_open, args=(("path", p),), icon=":material/dataset:",
-                              key=f"ex_{key_of(p)}")
-                for lab, p in ex_aoi:
-                    st.button(lab, on_click=request_aoi, args=(("path", p),), icon=":material/map:",
-                              key=f"aoi_ex_{key_of(p)}")
+# ------------------------------------------------------------------------------------------------ 3 field of interest
+# the raw data minus what lies outside the boundary: only the field to be cleaned, with the size of the field / trial
+with st.container(border=True, key="occd_step_3"):
+    st.html('<div id="field-of-interest"></div>')
+    brand.step_header(3, "Field of interest", "The raw data inside the boundary: only the field that will be cleaned")
+    foi_block(aoi, aoi_pending, RAW)
 
 if cand is None:
     stop_with_tree()
-TREE["input"] = cand["label"]
+TREE["input"] = TREE["input"] or cand["label"]
 CK = key_of(cand.get("path") or cand["probe"].root)
 AK = aoi["key"] if aoi else "noaoi"
 
-# ------------------------------------------------------------------------------------------------ 2 decode / check
+# ------------------------------------------------------------------------------------------------ 4 decode / check
 shp = None
-with st.container(border=True, key="occd_step_2"):
+with st.container(border=True, key="occd_step_4"):
     if not os.path.exists(cand.get("path") or cand["probe"].root):
         # the work folder vanished under the page (deleted from another tab or in Explorer): say so, no traceback
         st.error("The data of this run is no longer on disk (its folder was removed): start over, or open the input "
                  "again.", icon=":material/error:")
         stop_with_tree()
     if cand["kind"] == "raw":
-        brand.step_header(2, "Decode", "Raw monitor data: choose the tasks and decode them into points")
+        brand.step_header(4, "Decode", "Raw monitor data: choose the tasks and decode them into points")
         fid = cand["decoder"]
         root = cand["probe"].root
         if root not in ss.units:
@@ -1899,7 +2152,7 @@ with st.container(border=True, key="occd_step_2"):
             c1, c2 = st.columns([1, 3])
             field = c1.selectbox("Field", fields, index=fields.index(fdef), key=f"field_{CK}")
             c2.caption("One field per DIFM file. The units pre-selected are those of the most recent season; click "
-                       "rows to change the selection. Load a field of interest in step 1 to choose the units by their "
+                       "rows to change the selection. Load a boundary in step 2 to choose the units by their "
                        "position instead of the monitor's field name.")
             V = U[U.field == field].reset_index(drop=True)
             default_rows = [int(i) for i in V.index[V["default"]]]
@@ -1996,11 +2249,11 @@ with st.container(border=True, key="occd_step_2"):
                        + ("; the field of interest is outlined in blue." if aoi else "."))
             file_download("Decoded points, all readings (.zip)", D["zip"], "application/zip", where="decode")
             shp = D["shp"]
-            TREE["input"] = f"{cand['label']} · {D['n']:,} readings decoded"
+            TREE["decode"] = f"{D['n']:,} readings decoded"
         else:
-            TREE["input"] = f"{cand['label']} · not decoded yet"
+            TREE["decode"] = "not decoded yet"
     else:
-        brand.step_header(2, "Export", "The point export as it will be cleaned")
+        brand.step_header(4, "Export", "The point export as it will be cleaned")
         info = shp_info(cand["path"], mtime(cand["path"]))
         det = yc.detect_columns(info["fields"])
         with st.container(horizontal=True):
@@ -2020,16 +2273,16 @@ with st.container(border=True, key="occd_step_2"):
                        + ", coloured by yield (red low, green high)"
                        + ("; the field of interest is outlined in blue." if aoi else "."))
         shp = cand["path"]
-        TREE["input"] = cand["label"] if "point" in cand["label"] else f"{cand['label']} · {info['n']:,} points"
+        TREE["decode"] = f"{info['n']:,} points, as exported"
 
-# ------------------------------------------------------------------------------------------------ 3 cleaning
+# ------------------------------------------------------------------------------------------------ 5 cleaning
 settings, settings_error, S = None, None, None
-with st.container(border=True, key="occd_step_3"):
+with st.container(border=True, key="occd_step_5"):
     with st.container(horizontal=True, vertical_alignment="center"):
-        brand.step_header(3, "Cleaning", "Crop, cleaning method, column mapping and the filters")
+        brand.step_header(5, "Cleaning", "Crop, cleaning method, column mapping and the filters")
         st.button("Reset to house standard", on_click=reset_settings, icon=":material/restart_alt:")
     if shp is None:
-        st.info("Decode the raw data first (step 2).", icon=":material/info:")
+        st.info("Decode the raw data first (step 4).", icon=":material/info:")
     else:
         info = shp_info(shp, mtime(shp))
         det = yc.detect_columns(info["fields"])
@@ -2038,7 +2291,7 @@ with st.container(border=True, key="occd_step_3"):
         # ---- crop: prefilled from the decoder (its options or the crop it used), else from the export's product name
         crop_guess, std_m_guess = step3_guesses(D, shp)
         tag_default = default_tag(cand, D)
-        # the house defaults of every step-3 input for this file: what 'Reset to house standard' assigns
+        # the house defaults of every step-5 input for this file: what 'Reset to house standard' assigns
         ss.step3_defaults = step3_defaults(shp, det, info["fields"], crop_guess, tag_default)
         crop_opts = [CROP_UNKNOWN] + list(common.CROPS)
         if f"crop_clean_{SK}" not in ss:
@@ -2064,7 +2317,7 @@ with st.container(border=True, key="occd_step_3"):
                 format_func=METHOD_LABEL.get,
                 help="OCCD cascade: the house standard, filters F0-F11 with measured thresholds. SMS 3-sigma: the Ag Leader "
                      "SMS Advanced sequence done by hand (clip to the field, Optimize Swath Widths, then speed, moisture and "
-                     "dry yield within mean ± 3 SD). Both: the two run on the same readings and step 4 compares them.") \
+                     "dry yield within mean ± 3 SD). Both: the two run on the same readings and step 6 compares them.") \
                 or "occd"
             if method == "sms3sigma":
                 st.caption("SMS 3-sigma: the options are in the **SMS 3-sigma** tab below; the OCCD filters and the "
@@ -2072,10 +2325,10 @@ with st.container(border=True, key="occd_step_3"):
                            "follows the SMS sequence, as in the OCCD run.")
             elif method == "both":
                 st.caption("Both methods run on the same readings: the OCCD cascade with the settings below and the SMS "
-                           "3-sigma sequence with the options of the **SMS 3-sigma** tab; step 4 shows each result and what "
+                           "3-sigma sequence with the options of the **SMS 3-sigma** tab; step 6 shows each result and what "
                            "differs between them.")
         # seed / reseed F1 from the crop default: when the crop changes, and when the inputs' state is gone (a run
-        # that died before step 3 drops the state of the widgets not drawn; the f_F1_crop marker is not a widget and
+        # that died before step 5 drops the state of the widgets not drawn; the f_F1_crop marker is not a widget and
         # survives, so without this check the inputs would come back at 0-0 and the settings would be refused)
         if (ss.get("f_F1_crop", "__unset__") != crop_key or "f_F1_min_pct" not in ss or "f_F1_max_pct" not in ss):
             lo, hi = F1_CROP_RANGES.get(crop_key, F1_DEFAULT_RANGE)
@@ -2276,7 +2529,7 @@ with st.container(border=True, key="occd_step_3"):
         # ---- field of interest
         with tabs[len(UI_GROUPS) + 1]:
             if aoi is None:
-                st.info("No field of interest loaded (step 1). Without one the whole export is cleaned and the "
+                st.info("No boundary loaded (step 2). Without one the whole export is cleaned and the "
                         "monitor's field name defines the field.", icon=":material/info:")
             else:
                 st.caption(f"{aoi['name']}: {aoi['n_polygons']} polygon(s), {aoi['n_plots']} plot(s), "
@@ -2294,10 +2547,10 @@ with st.container(border=True, key="occd_step_3"):
                                      disabled=aoi is None,
                                      help="The flagged file keeps every processed point with an In_AOI column.")
             if aoi is not None:
-                st.caption("The cleaning sees only the records inside the field of interest; the preview of step 2 "
+                st.caption("The cleaning sees only the records inside the field of interest; the preview of step 4 "
                            "keeps every raw reading." if not aoi_buffer else
                            f"The cleaning also takes the records up to {aoi_buffer:g} m outside the field (headland "
-                           "context), which can include the edges of the neighbouring fields; the preview of step 2 "
+                           "context), which can include the edges of the neighbouring fields; the preview of step 4 "
                            "keeps every raw reading.")
             sources_footer("aoi", "field of interest: house method")
 
@@ -2525,7 +2778,7 @@ with st.container(border=True, key="occd_step_3"):
         if aoi_pending:
             settings_error = "field of interest not chosen"
             settings = None
-            st.error("The field-of-interest file holds several fields: choose one in step 1 before running.",
+            st.error("The field-of-interest file holds several fields: choose one in step 2 before running.",
                      icon=":material/error:")
         if compat_notes:
             show_warnings(compat_notes, "Cleaning engine without the v2 settings")
@@ -2666,7 +2919,7 @@ def show_result(R: dict, where: str = "results"):
                 mo = R.get("moisture") or {}
                 if mo and mo.get("standard_pct") is None:
                     st.warning("Standard moisture Ms unknown (no crop, no decoder value, too few shrunk records in the "
-                               "export): no Yld_Dry_Sy column and no share below Ms. Set the crop or Ms in step 3.",
+                               "export): no Yld_Dry_Sy column and no share below Ms. Set the crop or Ms in step 5.",
                                icon=":material/warning:")
                 elif mo:
                     n_below = mo.get("n_below_standard")
@@ -2979,9 +3232,9 @@ def show_comparison(C: dict | None, R: dict, R3: dict | None):
             "see where the choice matters for the trial.", icon=":material/lightbulb:")
 
 
-# ------------------------------------------------------------------------------------------------ 4 run
-with st.container(border=True, key="occd_step_4"):
-    brand.step_header(4, "Run and download", "Run the cleaning, check the result and download the DIFM-ready file")
+# ------------------------------------------------------------------------------------------------ 6 run
+with st.container(border=True, key="occd_step_6"):
+    brand.step_header(6, "Run and download", "Run the cleaning, check the result and download the DIFM-ready file")
     seed_field_name(aoi, (S or {}).get("tag") if S else None)        # before the widget: the default name follows the input
     with st.container(horizontal=True, vertical_alignment="bottom"):
         go = st.button("Run cleaning", type="primary", icon=":material/play_arrow:", key="run_go",
