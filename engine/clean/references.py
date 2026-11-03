@@ -478,6 +478,8 @@ _EMBEDDED_ROWS = {
         "venue": 'Agronomy (MDPI), ISSN 2073-4395', "volume": '16', "issue": '3', "pages": '386 (article number)', "doi": 'https://doi.org/10.3390/agronomy16030386'},
     'Arslan 2002a': {"authors": 'Arslan, S.; Colvin, T.S.', "year": '2002', "title": 'An Evaluation of the Response of Yield Monitors and Combines to Varying Yields',
         "venue": 'Precision Agriculture', "volume": '3', "issue": '2', "pages": '107-122', "doi": 'https://doi.org/10.1023/A:1013887801918'},
+    'Carneiro 2022': {"authors": 'Carneiro, F. M.; Shiratsuchi, L.', "year": '2022', "title": 'How to Correct a Yield Map When Using Multiple Harvest Machines',
+        "venue": 'Louisiana Crops Newsletter, LSU AgCenter (extension article, not refereed)', "volume": '12', "issue": '1', "pages": '', "doi": 'https://lsuagcenter.com/articles/page1645406281020'},
     'Chiocco 2019': {"authors": 'Chiocco, G. D.; Wuestefeld, E. A. (inventors); assignee: Trimble Inc. (current assignee per Google Patents: PTX Trimble LLC)', "year": '2019', "title": 'Crop yield data adjustments',
         "venue": 'United States Patent US 10,373,353 B2 (application US 14/068,644; filed 31 Oct 2013, priority 31 Oct 2013, granted 6 Aug 2019; pre-grant publication US 2015/0116330 A1, 30 Apr 2015)', "volume": '', "issue": '', "pages": '', "doi": ''},
     'Chung 2002': {"authors": 'Chung, S. O.; Sudduth, K. A.; Drummond, S. T.', "year": '2002', "title": 'Determining Yield Monitoring System Delay Time with Geostatistical and Data Segmentation Approaches',
