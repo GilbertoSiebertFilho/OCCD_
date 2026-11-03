@@ -955,6 +955,72 @@ def _section_machines(story, R, num):
             lines = [", ".join(f"{_e(a)} = {_n(b, 4) if isinstance(b, (int, float)) else _e(b)}" for a, b in V.items())]
         story.append(Paragraph("Validation of the paired-cell estimate against the per-machine totals "
                                "(agreement = (L_m / L_ref) / f_paired - 1): " + "; ".join(lines) + ".", BODY))
+    _section_seams(story, R)
+
+
+def _fig_block(story, R, key, title, caption, max_h):
+    """A figure of the run with its bold title and caption, kept together on one page; nothing when not written."""
+    p = _g(R, "files", "figures", key)
+    if not p or not os.path.exists(p):
+        return
+    story.append(KeepTogether([Paragraph(title, BODY), _image(p, TEXT_W, max_h), Paragraph(caption, CAP)]))
+
+
+def _final_map(story, R):
+    """The final map (fig_clean_final.png): the column to map in DIFM over the points of the DIFM-ready file."""
+    fm = R.get("final_map") or {}
+    applied = "; ".join(_e(a) for a in (fm.get("applied") or []))
+    _fig_block(story, R, "final", f"<b>Final map</b>: {_e(fm.get('column', ''))}, the yield to map in DIFM",
+               f"The {_n(fm.get('n_points'))} points of the DIFM-ready file with their own values ({_e(fm.get('values_from') or '')}); "
+               f"mean {_n(fm.get('mean'), 1)}, median {_n(fm.get('median'), 1)}, SD {_n(fm.get('sd'), 1)} bu/ac, CV "
+               f"{_n(fm.get('cv_pct'), 1)} %. {applied}. Colours centred on the field mean (yellow): red below, green "
+               "above; nothing is interpolated or smoothed.", 4.9 * inch)
+
+
+def _section_seams(story, R):
+    """The seams between neighbouring passes (R['machines']['seams']) and the combine and seam maps."""
+    M = R.get("machines") or {}
+    S = M.get("seams")
+    _fig_block(story, R, "combines", "<b>The combines and their factor</b>",
+               "Left: the combine that cut each kept strip. Then the yield as mapped and, when a factor other than 1 "
+               "was applied, Yld_Harm = the reading x the factor of its combine, on one colour scale.", 4.6 * inch)
+    if not S:
+        return
+    story.append(Paragraph("<b>Seams between neighbouring passes</b>: " + _e(S.get("rule") or "") + ".", BODY))
+    sc, db, da = S["same_combine"], S["different_combines"]["before"], S["different_combines"]["after"]
+    moved = S["different_combines"].get("factor_moved_them")
+    rows = [["Neighbouring passes", "Stretches", "Pass pairs", "Median difference %", "Stretches > 10 %"]]
+    for lab, st in (("same combine", sc), ("different combines" + (", before the factor" if moved else ""), db)) + (
+            (("different combines, after the factor", da),) if moved else ()):
+        rows.append([_e(lab), _n(st.get("stretches")), _n(st.get("pass_pairs")), _n(st.get("median_pct"), 1),
+                     (_n(st.get("share_above_10_pct"), 0) + " %") if st.get("share_above_10_pct") is not None
+                     else "-"])
+    w = [2.3, 0.9, 0.9, 1.4, 1.3]
+    scale = TEXT_W / (sum(w) * inch)
+    t = _table(rows, [x * inch * scale for x in w], small=True)
+    t.setStyle(TableStyle([("ALIGN", (1, 0), (-1, -1), "RIGHT")]))
+    story.append(t)
+    pr = S.get("pairs") or []
+    if pr:
+        story.append(Paragraph("Per pair of combines (a over b = the median signed difference at their seams: the part "
+                               "a calibration difference would make the same on every seam):", BODY))
+        rows = [["Combine a", "Combine b", "Stretches", "Pass pairs", "Median diff. %", "a over b %"]]
+        for p_ in pr:
+            md = _n(p_.get("median_pct_before"), 1) + ((" &rarr; " + _n(p_.get("median_pct_after"), 1)) if moved else "")
+            ab = (f"{p_.get('a_over_b_pct_before'):+.1f}" + (f" &rarr; {p_.get('a_over_b_pct_after'):+.1f}" if moved else ""))
+            rows.append([_e(p_.get("a")), _e(p_.get("b")), _n(p_.get("stretches")), _n(p_.get("pass_pairs")), md, ab])
+        w = [1.45, 1.45, 0.75, 0.75, 1.2, 1.2]
+        scale = TEXT_W / (sum(w) * inch)
+        t = _table(rows, [x * inch * scale for x in w], small=True)
+        t.setStyle(TableStyle([("ALIGN", (2, 0), (-1, -1), "RIGHT")]))
+        story.append(t)
+        if moved:
+            story.append(Paragraph("before &rarr; after the combine factor.", CAP))
+    story.append(Paragraph(_e(S.get("text") or ""), BODY))
+    _fig_block(story, R, "seams", "<b>Seam map</b>",
+               "Each line is 50 m of the seam between two neighbouring passes, coloured by how much the two passes "
+               "differ there (the mean of the kept readings on each side). Bars: the share of the stretches in each "
+               "class.", 5.0 * inch)
 
 
 def _section_level(story, R, num):
@@ -1167,6 +1233,7 @@ def make_report(result: dict, path: str) -> str:
         story.append(Paragraph("Notes", H2))
         for w in notes:
             story.append(Paragraph(_e(w), BUL, bulletText="•"))
+    _final_map(story, R)
 
     # ---- 2. cascade
     story.append(Spacer(1, 4))

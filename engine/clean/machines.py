@@ -134,6 +134,25 @@ Method (the numbers are house conventions unless cited)
      normalisation of Carneiro & Shiratsuchi and of Maldaner et al.'s machine factor.
  12. The SMS 3-sigma method gets the same factor after its sequence (yield_clean: the combine factor is a step on the
      kept points after the cleaning, OCCD or SMS 3-sigma).
+ 13. Seams (seam_blocks, seam_summary; v2.6.1; a diagnostic of the map, never applied). Stripes on a yield map are steps
+     between neighbouring passes; with several combines the question is whether the steps between passes of
+     DIFFERENT combines are larger than those between passes of the SAME combine (the field's own pass-to-pass step:
+     ground, direction of travel, overlap, flow delay). Every kept point (at its final position) is linked to the
+     nearest point of another pass within D (item 9) that lies ACROSS the track (the link at >= 60 deg from the
+     point's heading, so the next pass along the same line is not a neighbour); a pass pair with >= SEAM_MIN_POINTS
+     (10) linked points on each side is a seam. Each seam is cut into stretches of SEAM_BLOCK_M (50 m) along its first
+     pass (cumulative distance in record order; the points of the other pass go to the stretch of their nearest point
+     across); a stretch with >= SEAM_BLOCK_MIN_POINTS (5) points on each side gives its step ln(mean of one side /
+     mean of the other) on the yield as mapped before the combine factor and on Yld_Harm. The difference of a
+     stretch is 100 (exp|step| - 1) %: how much the higher side reads above the lower one. Reported: the median
+     difference and the share above 10 % of the stretches between passes of the same combine and of different
+     combines (before and after the factor), and per pair of combines the median signed difference a over b (the
+     part a calibration difference would make the same on every seam). A factor is one number per combine: it
+     moves only the seams between different combines and removes only the part that is the same on all of them.
+     Real fields (50 m stretches): 4 monitors interleaved, same combine 7.1 % (434 stretches), different 6.1 % (999)
+     before and 6.3 % after the one factor applied (x 1.027): the stripes are the field's own; 2 combines in mixed
+     blocks, same 7.5 % (1,164), different 10.6 % (49 stretches along 12 pass pairs) with no factor proven by the
+     cells (CI includes 1).
 
 Evidence (tests/test_aoi_sessions_machines.py, Trial 19 SMS export split into pseudo-machines with the design, pairs
 on the <= 2 % overlap records: every third pass = machine B): B x 1.08 gives f30 = 0.9105 (CI 0.876-0.937, 40 cells /
@@ -1251,6 +1270,196 @@ def _cells_text(P: dict, ov_txt: str) -> str:
                f"weight confirms it (monitor total with the factor within {100 * float(P['ticket_close_tol']):g} % of the "
                f"scale, without it more than {100 * TICKET_OPEN_MULT * float(P['ticket_close_tol']):g} % away)"
                if P.get("ticket_confirms", True) else ""))
+
+
+# ===================================================================================================== seams
+SEAM_BLOCK_M = 50.0                      # seams (item 13): every seam is cut into stretches of 50 m along it ...
+SEAM_MIN_POINTS = 10                     # ... a pass pair is a seam with >= 10 linked points on each side ...
+SEAM_BLOCK_MIN_POINTS = 5                # ... and a stretch counts with >= 5 points on each side
+SEAM_ACROSS_COS = 0.5                    # a link runs across the track: >= 60 deg from the point's heading
+SEAM_K = 64                              # the linked point is searched among the 64 nearest points ...
+SEAM_CHUNK = 20000                       # ... for 20,000 points at a time (about 80 MB)
+SEAM_CLASSES_PCT = (5, 10, 15, 20)       # the classes of the seam map and of its bars (%)
+SEAM_COLUMNS = ["lo", "hi", "ma", "mb", "na", "nb", "lr_before", "lr_after", "x", "y", "line"]
+
+
+def seam_links(x, y, pas, hdg, D: float) -> np.ndarray:
+    """The linked point of every point (module docstring, item 13): the index of the nearest point of ANOTHER pass
+    within D m whose direction from the point is >= 60 deg from the point's heading (across the track: the pass
+    beside it, not the next pass along the same line), -1 when there is none. A point without a heading takes the
+    nearest point of another pass; a point without a position is never linked."""
+    x, y, pas = np.asarray(x, float), np.asarray(y, float), np.asarray(pas)
+    n = len(x)
+    j = np.full(n, -1, np.int64)
+    pos = np.where(np.isfinite(x) & np.isfinite(y))[0]
+    if len(pos) < 2:
+        return j
+    xs, ys, ps = x[pos], y[pos], pas[pos]
+    h = np.radians(np.asarray(hdg, float)[pos])
+    hx, hy = np.sin(h), np.cos(h)
+    X = np.c_[xs, ys]
+    tree = cKDTree(X)
+    k = min(SEAM_K, len(pos))
+    for s in range(0, len(pos), SEAM_CHUNK):
+        e = min(len(pos), s + SEAM_CHUNK)
+        dd, ii = tree.query(X[s:e], k=k, distance_upper_bound=float(D))
+        fin = np.isfinite(dd)
+        ii = np.where(fin, ii, 0)
+        vx, vy = xs[ii] - xs[s:e, None], ys[ii] - ys[s:e, None]
+        dist = np.hypot(vx, vy)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            along = np.abs(vx * hx[s:e, None] + vy * hy[s:e, None]) / dist
+        across = np.where(np.isfinite(hx[s:e])[:, None], np.nan_to_num(along, nan=1.0) <= SEAM_ACROSS_COS, True)
+        ok = fin & (ps[ii] != ps[s:e, None]) & across & (dist > 0)
+        first = ok.argmax(axis=1)
+        jj = np.where(ok.any(axis=1), ii[np.arange(e - s), first], -1)
+        j[pos[s:e]] = np.where(jj >= 0, pos[np.maximum(jj, 0)], -1)
+    return j
+
+
+def seam_blocks(x, y, pas, mach, v_before, v_after, hdg, D: float, block_m: float = SEAM_BLOCK_M) -> pd.DataFrame:
+    """The stretches of every seam between neighbouring passes (module docstring, item 13), one row each: lo / hi (the
+    two pass ids, lo < hi), ma / mb (their combines), na / nb (points of each side), lr_before / lr_after = log(mean of
+    the lo-side points / mean of the hi-side points) on v_before (the yield as mapped) and v_after (Yld_Harm), x / y
+    the centre of the stretch and line the (k, 2) centre line between the two passes (for the map). The arrays are the
+    kept points in record order, with their final position (m) and heading (deg)."""
+    x, y = np.asarray(x, float), np.asarray(y, float)
+    pas, mach = np.asarray(pas), np.asarray(mach).astype(str)
+    vb, va = np.asarray(v_before, float), np.asarray(v_after, float)
+    j = seam_links(x, y, pas, hdg, D)
+    i = np.where(j >= 0)[0]
+    if len(i) == 0:
+        return pd.DataFrame(columns=SEAM_COLUMNS)
+    jj = j[i]
+    pi, pj = pas[i], pas[jj]
+    lo, hi = np.minimum(pi, pj), np.maximum(pi, pj)
+    d = pd.DataFrame({"pt": i, "nb": jj, "lo": lo, "hi": hi, "side_lo": pi == lo})
+    cnt = d.groupby(["lo", "hi"])["side_lo"].agg(["sum", "size"])
+    good = cnt[(cnt["sum"] >= SEAM_MIN_POINTS) & (cnt["size"] - cnt["sum"] >= SEAM_MIN_POINTS)].index
+    d = d[pd.MultiIndex.from_arrays([d["lo"], d["hi"]]).isin(good)]
+    rows = []
+    for (lo_, hi_), s in d.groupby(["lo", "hi"], sort=True):
+        A = s[s["side_lo"]].sort_values("pt")                  # the lo-side points in record order along their pass
+        Bp = s.loc[~s["side_lo"], "pt"].to_numpy()
+        ap, an = A["pt"].to_numpy(), A["nb"].to_numpy()
+        cum = np.r_[0.0, np.cumsum(np.hypot(np.diff(x[ap]), np.diff(y[ap])))]
+        blk_a = (cum // float(block_m)).astype(np.int64)
+        _, q = cKDTree(np.c_[x[ap], y[ap]]).query(np.c_[x[Bp], y[Bp]])
+        blk_b = blk_a[q]                                       # a hi-side point goes to the stretch of its nearest point
+        ma, mb = mach[ap[0]], mach[Bp[0]]
+        for b in np.unique(blk_a):
+            sa, sb = ap[blk_a == b], Bp[blk_b == b]
+            if len(sa) < SEAM_BLOCK_MIN_POINTS or len(sb) < SEAM_BLOCK_MIN_POINTS:
+                continue
+            m_ab, m_bb, m_aa, m_ba = np.nanmean(vb[sa]), np.nanmean(vb[sb]), np.nanmean(va[sa]), np.nanmean(va[sb])
+            if not (m_ab > 0 and m_bb > 0 and m_aa > 0 and m_ba > 0):
+                continue
+            nb_ = an[blk_a == b]
+            line = np.c_[(x[sa] + x[nb_]) / 2, (y[sa] + y[nb_]) / 2]
+            rows.append({"lo": lo_, "hi": hi_, "ma": ma, "mb": mb, "na": int(len(sa)), "nb": int(len(sb)),
+                         "lr_before": float(np.log(m_ab / m_bb)), "lr_after": float(np.log(m_aa / m_ba)),
+                         "x": float(line[:, 0].mean()), "y": float(line[:, 1].mean()), "line": line})
+    return pd.DataFrame(rows, columns=SEAM_COLUMNS)
+
+
+def seam_pct(lr) -> np.ndarray:
+    """The difference of a stretch: how much its higher side reads above its lower side, 100 (exp|step| - 1) %."""
+    return 100 * (np.exp(np.abs(np.asarray(lr, float))) - 1)
+
+
+def seam_class_shares(lr) -> list:
+    """The share (%) of the stretches in each class of SEAM_CLASSES_PCT (< 5, 5-10, 10-15, 15-20, >= 20 %)."""
+    p = seam_pct(lr)
+    if not len(p):
+        return []
+    k = np.searchsorted(np.asarray(SEAM_CLASSES_PCT, float), p, side="right")
+    return [float(100 * np.mean(k == c)) for c in range(len(SEAM_CLASSES_PCT) + 1)]
+
+
+def _seam_stats(B: pd.DataFrame, col: str) -> dict:
+    p = seam_pct(B[col]) if len(B) else np.array([])
+    return {"stretches": int(len(B)), "pass_pairs": int(len(B[["lo", "hi"]].drop_duplicates())) if len(B) else 0,
+            "median_pct": float(np.median(p)) if len(p) else None,
+            "share_above_10_pct": float(100 * np.mean(p > 10)) if len(p) else None,
+            "class_shares_pct": seam_class_shares(B[col]) if len(B) else []}
+
+
+def seam_summary(B: pd.DataFrame, D: float, factors: dict | None = None, min_pass_pairs: int = 5,
+                 block_m: float = SEAM_BLOCK_M) -> dict:
+    """R['machines']['seams'] (module docstring, item 13): the stretches between passes of the same combine and of
+    different combines (before and after the factor), per pair of combines, and the plain-language reading. factors =
+    the factor applied to every combine (what tells whether an 'after' differs from the 'before')."""
+    B = B if B is not None else pd.DataFrame(columns=SEAM_COLUMNS)
+    cross = (B["ma"].astype(str) != B["mb"].astype(str)).to_numpy() if len(B) else np.zeros(0, bool)
+    same, diff = B[~cross], B[cross]
+    fac = {str(k): float(v) for k, v in (factors or {}).items()}
+    moved = bool(len(diff)) and any(abs(fac.get(str(m), 1.0) - 1) > 1e-12 for m in set(diff["ma"]) | set(diff["mb"]))
+    pairs = []
+    if len(diff):
+        sw = (diff["ma"].astype(str) > diff["mb"].astype(str)).to_numpy()
+        a = np.where(sw, diff["mb"], diff["ma"]).astype(str)
+        b = np.where(sw, diff["ma"], diff["mb"]).astype(str)
+        sb_ = np.where(sw, -diff["lr_before"], diff["lr_before"])          # oriented a over b
+        sa_ = np.where(sw, -diff["lr_after"], diff["lr_after"])
+        t = pd.DataFrame({"a": a, "b": b, "lo": diff["lo"].to_numpy(), "hi": diff["hi"].to_numpy(),
+                          "sb": sb_, "sa": sa_})
+        for (a_, b_), s in t.groupby(["a", "b"], sort=True):
+            pairs.append({"a": a_, "b": b_, "stretches": int(len(s)),
+                          "pass_pairs": int(len(s[["lo", "hi"]].drop_duplicates())),
+                          "median_pct_before": float(np.median(seam_pct(s["sb"]))),
+                          "median_pct_after": float(np.median(seam_pct(s["sa"]))),
+                          "a_over_b_pct_before": float(100 * (np.exp(np.median(s["sb"])) - 1)),
+                          "a_over_b_pct_after": float(100 * (np.exp(np.median(s["sa"])) - 1))})
+    out = {"D_m": float(D), "stretch_m": float(block_m), "min_points_seam": SEAM_MIN_POINTS,
+           "min_points_stretch": SEAM_BLOCK_MIN_POINTS, "classes_pct": list(SEAM_CLASSES_PCT),
+           "same_combine": _seam_stats(same, "lr_before"),
+           "different_combines": {"before": _seam_stats(diff, "lr_before"), "after": _seam_stats(diff, "lr_after"),
+                                  "factor_moved_them": moved},
+           "pairs": pairs,
+           "rule": (f"every kept point linked to the nearest point of another pass within {D:.0f} m across the track; "
+                    f"a pass pair with >= {SEAM_MIN_POINTS} linked points on each side is a seam, cut into "
+                    f"{block_m:g} m stretches with >= {SEAM_BLOCK_MIN_POINTS} points on each side; difference = how "
+                    "much the higher side of a stretch reads above the lower side; a diagnostic of the map, never "
+                    "applied")}
+    out["text"] = seam_text(out, min_pass_pairs)
+    return out
+
+
+def seam_text(S: dict, min_pass_pairs: int = 5) -> str:
+    """The plain-language reading of the seam diagnostic (seam_summary)."""
+    sc, db, da = S["same_combine"], S["different_combines"]["before"], S["different_combines"]["after"]
+    L = f"{S['stretch_m']:g} m"
+    same_t = (f"neighbouring passes of the SAME combine differ by a median {sc['median_pct']:.1f} % ({sc['stretches']:,} "
+              f"stretches of {L})" if sc["stretches"] else "no two passes of the same combine are neighbours")
+    if not db["stretches"]:
+        return ("The combines never harvested neighbouring passes, so this map has no seam between combines; "
+                + same_t + ".")
+    moved = S["different_combines"].get("factor_moved_them")
+    npp = db["pass_pairs"]
+    diff_t = (f"neighbouring passes of DIFFERENT combines differ by a median {db['median_pct']:.1f} % "
+              f"({db['stretches']:,} stretch{'es' if db['stretches'] != 1 else ''} of {L} along {npp} pass "
+              f"pair{'s' if npp != 1 else ''}"
+              + (f") before the combine factor and {da['median_pct']:.1f} % after it" if moved else
+                 "; no combine factor applied)"))
+    txt = diff_t[0].upper() + diff_t[1:] + "; " + same_t + ". "
+    if not sc["stretches"]:
+        return txt + "With no seam inside one combine there is nothing to compare the seams between combines with."
+    final = da["median_pct"] if moved else db["median_pct"]
+    if final <= sc["median_pct"]:
+        txt += ("The seams between the combines are no larger than the field's own pass-to-pass steps: the stripes of "
+                "this map are not a difference between the machines, and a factor cannot remove them (they come from "
+                "the ground, the direction of travel, the overlap and the flow delay, and are in the passes of one "
+                "combine too).")
+    else:
+        txt += (f"The seams between the combines are larger than the field's own pass-to-pass steps by "
+                f"{final - sc['median_pct']:.1f} points of %. A factor is one number per combine: it removes only the "
+                "part of the difference that is the same on every seam (a calibration difference), and only when "
+                "the side-by-side passes prove it (the gates above).")
+        if db["pass_pairs"] < int(min_pass_pairs):
+            txt += (f" Only {npp} pass pair{'s' if npp != 1 else ''} of different combines "
+                    f"{'are neighbours' if npp != 1 else 'is a neighbour'}: too few to tell a machine difference from "
+                    "the ground under those passes.")
+    return txt
 
 
 # ===================================================================================================== totals

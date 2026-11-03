@@ -1,4 +1,4 @@
-OCCD - Olds College Cleaning Data 2.6.0 - instalação num computador novo
+OCCD - Olds College Cleaning Data 2.6.1 - instalação num computador novo
 ========================================================================
 
 1. Extraia o zip (botão direito > Extrair tudo) e ponha a pasta "App limpeza DIFM" num disco LOCAL, por exemplo

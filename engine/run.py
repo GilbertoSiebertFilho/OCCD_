@@ -76,7 +76,7 @@ import pandas as pd
 from engine.formats import common, detect
 from engine.clean import yield_clean
 
-__version__ = "2.6.0"
+__version__ = "2.6.1"
 APP_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SHP_EXTS = (".shp", ".shx", ".dbf", ".prj", ".cpg")
 
@@ -1641,6 +1641,13 @@ def _cli(a) -> int:
                    f"{float(wi.get('total_bu', float('nan'))):,.1f} bu ({float(wi.get('diff_pct', float('nan'))):+.2f} %): "
                    + ("applied" if tt.get("applied") else "not applied")
                    + (f" ({', '.join(map(str, tt.get('machines') or []))})" if tt.get("machines") else ""))
+    se = (R.get("machines") or {}).get("seams") or {}
+    if se.get("text"):
+        _print(f"  seams            {se['text']}")
+    fm = R.get("final_map") or {}
+    if fm:
+        _print(f"  final map        {fm['column']}: mean {fm['mean']:,.1f} bu/ac over {fm['n_points']:,} points "
+               f"(fig_clean_final.png); " + "; ".join(fm.get("applied") or []))
     if R.get("aoi"):
         A = R["aoi"]
         _print(f"  field of interest {_count(A.get('n_in'))} records inside + {A.get('buffer_m') or AOI_BUFFER_M:g} m, "

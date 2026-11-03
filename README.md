@@ -13,7 +13,10 @@ shapefile. A **field of interest** (boundary or trial design) keeps only the fie
 export holds several fields, and the run reports the **harvest sessions** (days / combines), the **moisture basis**
 and the **combine harmonisation** so that the yield column mapped in DIFM is the right one.
 
-Owner: Gilberto Siebert Filho, Olds College Smart Farm (OFPE). App version 2.6.0 (2.6 = the **combine factor** after the
+Owner: Gilberto Siebert Filho, Olds College Smart Farm (OFPE). App version 2.6.1 (2.6.1 = the **final map**, the
+column to map in DIFM read back from the DIFM-ready file, and with several combines the **combine map** (who cut each
+strip, the yield before and after the factor) and the **seam map** (how much neighbouring passes differ inside one
+combine and between combines): section *Several combines*; 2.6 = the **combine factor** after the
 cleaning with a choice of method - paired cells, machine x machine, track x track, point x point or auto - chosen
 from how the combines shared the field (interleaved passes, mixed, blocks), also after the SMS 3-sigma sequence,
 combines told apart by dataset names that are VINs, and a new look for the app: section *Several combines*;
@@ -619,6 +622,24 @@ with the tests, with the share of each combine's kept records left out by the ov
 spatial_check true, method "auto"}`. The app takes the grower's weight of the whole field only (Corrections tab); per-combine totals
 can still be given in a settings file or on the CLI. On a seed-rate trial the gate is
 underpowered without the design (adjacent passes carry different rates): give the design.
+
+**Stripes, the seam map and the combine map (v2.6.1).** Stripes on a yield map are steps between neighbouring passes,
+and a combine factor is one number per combine: it can only remove the part of the step between two combines that is
+the same on every seam (a calibration difference). The run measures the steps on the kept points: every seam between
+two neighbouring passes (linked across the track within 1.5 header widths) is cut into 50 m stretches, and each stretch
+with >= 5 points on each side gives how much the higher pass reads above the lower one. `fig_clean_seams.png` maps
+the stretches between passes of the **same** combine and between passes of **different** combines (before and after
+the factor) on one colour scale, with the share of the stretches in each class (`machines.seams` in the JSON, the
+*Combines and seams* tab of the app, the Combines section of the report). When the seams between combines are no
+larger than those inside one combine, the stripes are the field's own (ground, direction, overlap, flow delay) and no
+factor can remove them; when they are larger, the factor is applied only where the side-by-side passes prove it.
+`fig_clean_combines.png` shows which combine cut each strip and the yield before and after the factor. Real fields:
+four monitors on interleaved passes, same combine 7.1 %, different combines 6.1 % before and 6.3 % after the one
+factor applied (x 1.027); two combines on mixed blocks, same combine 7.5 %, different 10.6 % on 49 stretches along 12
+pass pairs, the cells' CI including 1, so no factor. The **final map** (`fig_clean_final.png`, the first tab of the
+results and the first page of the report) is the column to map in DIFM over the points of the DIFM-ready file, the
+values read back from that file, colours centred on the field mean, with what the column carries (filters, combine
+factor, level) written under it. Nothing on these maps is interpolated or smoothed.
 
 ### Grower's weight as the real level
 

@@ -549,6 +549,29 @@ combine B (x 1.0596 on its records; combine A keeps 1) vs the paired 1.043 (insi
 combines without a ticket take the reference's L and read "no paired estimate: too few pairs" (the ungated estimates,
 1.076 and 0.991, are kept in the JSON as `paired_factor_ungated` only).
 
+**6.6 Seams between neighbouring passes (v2.6.1; a diagnostic of the map, never applied).** Stripes on a yield map are
+steps between neighbouring passes. With several combines the question is whether the steps between passes of
+**different** combines are larger than those between passes of the **same** combine, which are the field's own
+pass-to-pass steps (ground, direction of travel, overlap, flow delay). Every kept point, at its final position, is
+linked to the nearest point of another pass within D (6.1) that lies across the track (the link at >= 60 deg from the
+point's heading, so the next pass along the same line is not a neighbour). A pass pair with >= 10 linked points on
+each side is a seam. Each seam is cut into 50 m stretches along its first pass (cumulative distance in record order;
+the points of the other pass go to the stretch of their nearest point across), and a stretch with >= 5 points on each
+side gives its difference: how much the higher side reads above the lower one, 100 (exp|ln(mean a / mean b)| - 1) %,
+on the yield as mapped before the combine factor and on `Yld_Harm`. Reported in `machines.seams`: the median
+difference and the share above 10 % of the stretches of the same combine and of different combines (before and after
+the factor), and per pair of combines the median signed difference a over b, the part a calibration difference would
+make the same on every seam. A factor is one number per combine: it moves only the seams between different combines
+and removes only that common part. Figure `fig_clean_seams.png` draws every stretch as a line coloured by its
+difference (< 5, 5-10, 10-15, 15-20, >= 20 %), one map for the same combine and one for different combines (before
+and after the factor), with the share of the stretches in each class. Real fields: four monitors on interleaved
+passes, same combine 7.1 % (434 stretches), different combines 6.1 % (999 stretches along 105 pass pairs) before and
+6.3 % after the one factor applied (x 1.027): the stripes of that map are the field's own, not the machines'; two
+combines that cut mixed blocks, same combine 7.5 % (1,164 stretches), different combines 10.6 % (49 stretches along
+12 pass pairs), with the side-by-side cells not proving a factor (CI includes 1), so none is applied and the map keeps
+the readings. Figure `fig_clean_combines.png` shows which combine cut each kept strip and the yield before and after
+the factor on one colour scale.
+
 ## 7. Level
 
 Processed-set total = the sum over **every processed record** (inside the AOI + 50 m when one is given, else the whole
@@ -639,13 +662,21 @@ lb and in bu, the test weight used and where it came from, the monitor total in 
   `Plot_Id`, `Tgt_Rate`, so every removal can be audited. `Overlap_f` is the overlap F8 judged (at the logged
   position by default; at the flow-delay source with the `lag_stage` "before_f7" option; section 4) and `Lag_rec`
   the shift in records.
-- `<tag>_cleaning.json` (`pre_steps`, `cascade`, `f8`, `lag`, `aoi`, `moisture`, `sessions`, `machines`, `level`,
-  `warnings`, `advice`), five figures (map, cascade, F8 dose-response, lag scan, sessions) and the report PDF with
-  the references of the steps that ran. Since v2.4 `f8` also holds `footprint`, `y_offset`, `reference_mode`,
+- `<tag>_cleaning.json` (`pre_steps`, `cascade`, `f8`, `lag`, `aoi`, `moisture`, `sessions`, `machines` (with
+  `seams`), `level`, `final_map`, `warnings`, `advice`), the figures (final map, cleaning map, cascade, F8
+  dose-response, lag scan, sessions and, with several combines, the combine map and the seam map) and the report PDF
+  with the references of the steps that ran. Since v2.4 `f8` also holds `footprint`, `y_offset`, `reference_mode`,
   `floor_applied`, `stop_kind` and `local` (`radius_m`, `radius_setting_m`, `full_width_m`, `edge_tol_m`,
   `min_controls`, `population`, `combine_key`, `n_combines`, `dose_n`, `matched_n`, `placebo_n`, `placebo_ratio`), and
   `lag` holds `stage`, `axis`, `measured_on` and `n_orphans`; the report reads them with defaults, so an older JSON
   still renders.
+- **The final map** (`fig_clean_final.png`, v2.6.1; the first page of the report and the first tab of the results):
+  the column to map in DIFM (`Yld_Harm`, `Yld_Level`, `Yld_Lvl_Sy` or the export's yield) over the points of the
+  DIFM-ready file, the values **read back from that file**, each point drawn as its strip with its own value: nothing is
+  interpolated or smoothed. Colours are centred on the field mean (yellow; red below, green above; scale 2nd-98th
+  percentile) and the legend is the distribution of the values in bu/ac and in % of the field mean. The lines under
+  it say what the column carries: the filters (points removed), the combine factor of each combine and the level to
+  the grower's weight. `final_map` in the JSON holds its mean, median, SD, CV and percentiles.
 - **The maps.** The map draws each reading as the strip its header swept since the previous reading (the swept strip
   of section 3, stored on the processed table; consecutive strips tile, so a turn shows no fan of overlapping
   rectangles and a Case IH pass start no stack of strips): before the cleaning every reading at its logged position,

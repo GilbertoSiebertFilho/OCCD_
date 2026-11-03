@@ -44,7 +44,7 @@ NAME = "OCCD"
 LONG_NAME = "OCCD — Olds College Cleaning Data"
 TAGLINE = "Olds College Cleaning Data · yield data cleaning for the DIFM platform"
 ORG = "Olds College Smart Farm (OFPE)"
-VERSION = "2.6.0"
+VERSION = "2.6.1"
 
 # ---- palette (hex strings; BRAND.md)
 NAVY = "#00358E"            # primary: buttons, headings, tree group titles, active states, lines and fits in figures
@@ -298,5 +298,5 @@ def rule():
 
 
 def footer_caption() -> str:
-    """The sidebar footer: 'OCCD 2.6.0 · Olds College Smart Farm (OFPE)'."""
+    """The sidebar footer: 'OCCD 2.6.1 · Olds College Smart Farm (OFPE)'."""
     return f"{NAME} {VERSION} · {ORG}"

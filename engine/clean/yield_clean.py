@@ -37,8 +37,9 @@ purpose (docs/METHOD.md section 10; write_points `patch`): the width column hold
 points, Distance / Speed / distance per fuel of the shortened points are rewritten, the per-area columns are
 multiplied by Swath_Scl = (W x D) / (W' x D') (Prod_ac_h_ and Fuel_Eff__ divided by it), Y_Offset is written 0 and
 every point sits where SMS moved it; every other cell is byte for byte the export's, and Wdth_Raw / Swath_Scl are
-added. Its files are named <tag>_sms3s_*, its figures are map, cascade (the S0-S5 steps), limits (fig_sms_limits.png)
-and sessions; the flagged file adds Wdth_Opt, Dist_Opt, Swath_Scl and Rem_By = S0 .. S5a, S5b.
+added. Its files are named <tag>_sms3s_*, its figures are the final map, map, cascade (the S0-S5 steps), limits
+(fig_sms_limits.png) and sessions (with several combines the combine and seam maps); the flagged file adds Wdth_Opt,
+Dist_Opt, Swath_Scl and Rem_By = S0 .. S5a, S5b.
 
 Input: a POINT SHAPEFILE (.shp + .shx + .dbf; the app unpacks zips before calling run). Units are the SMS / Ops
 Center ones: yield bu/ac, moisture %, speed mph, distance ft, swath width ft, heading deg (clockwise from north),
@@ -158,8 +159,10 @@ Steps
      <tag>_difm_ready.shp/.shx/.dbf/.prj/.cpg and <tag>_difm_ready.zip (the DIFM upload: only
      those five files), <tag>_flagged.shp(+zip) with every processed point and Keep / Rem_By / Pass_Id / Run_Id /
      Overlap_f / Lag_rec / Yld_Harm / Yld_Level / Yld_Lvl_Sy / X_log / Y_log / Yld_Dry_Sy / Harv_Day / Session (+ In_AOI /
-     Plot_Id / Tgt_Rate with an AOI), <tag>_cleaning.json, the five figures (fig_clean_map, _f8, _cascade, _lag,
-     _sessions) and <tag>_cleaning_report.pdf (engine/report/clean_report.py). The DIFM-ready file gets Yld_Harm /
+     Plot_Id / Tgt_Rate with an AOI), <tag>_cleaning.json, the figures (fig_clean_final = the column to map in DIFM
+     over the DIFM-ready points, read back from that file (R['final_map']); fig_clean_map, _f8, _cascade, _lag,
+     _sessions; with several combines fig_clean_combines and fig_clean_seams, R['machines']['seams']) and
+     <tag>_cleaning_report.pdf (engine/report/clean_report.py). The DIFM-ready file gets Yld_Harm /
      Yld_Level as before and, in a v2 run only (crop, moisture.standard_pct, an AOI or the scale_ticket dict given;
      R['v2_columns']), Yld_Lvl_Sy / Yld_Dry_Sy / Harv_Day / Session / Plot_Id / Tgt_Rate (R['difm_ready_added_columns']),
      so a plain run writes it byte for byte as the v1 engine did. Both point files are in WGS 84:
@@ -2735,6 +2738,24 @@ def clean(path, S, C, log=print, source=None):
     # swath move); internal columns, never written
     g["_gx"], g["_gy"] = np.asarray(gx, float), np.asarray(gy, float)
     g["_w_m"], g["_d_m"], g["_hdg"] = width_m.to_numpy(float), dist_m.to_numpy(float), hdg.to_numpy(float)
+    # ---- seams between neighbouring passes (engine/clean/machines.py, item 13): with several combines, the steps
+    # between passes of the same combine and of different combines, before and after the factor, on the kept points
+    # at their final positions; a diagnostic of the map (fig_clean_seams), never applied
+    if several and "machines" in R:
+        kept = np.asarray(alive, bool)
+        D_s = R["machines"].get("adjacency_distance_m")
+        if not D_s:
+            w_ = width_m.to_numpy(float)
+            w_ = w_[np.isfinite(w_) & (w_ > 0)]
+            D_s = machines_mod.ADJ_WIDTH_MULT * (float(np.median(w_)) if len(w_) else machines_mod.DEFAULT_WIDTH_M)
+        vb = y_map.to_numpy(float)
+        Bk = machines_mod.seam_blocks(g["_gx"].to_numpy(float)[kept], g["_gy"].to_numpy(float)[kept],
+                                      g["Pass_Id"].to_numpy()[kept], g["_machine"].astype(str).to_numpy()[kept],
+                                      vb[kept], (vb * harm.to_numpy(float))[kept], g["_hdg"].to_numpy(float)[kept],
+                                      float(D_s))
+        R["machines"]["seams"] = machines_mod.seam_summary(Bk, float(D_s), R["machines"].get("factor_applied"),
+                                                           int(Mset.get("min_pass_pairs") or 5))
+        diag["seams"] = Bk
     return g0, g, gx, gy, R, diag
 
 
@@ -2838,9 +2859,10 @@ def _map_strips(g, x0=0.0, y0=0.0):
     return q_log, q_fin
 
 
-def _strips(ax, quads, x, y, values=None, cmap=None, vmin=None, vmax=None, color=None, zorder=1, s=1.2):
+def _strips(ax, quads, x, y, values=None, cmap=None, vmin=None, vmax=None, color=None, zorder=1, s=1.2, norm=None):
     """Draw readings as their strips (one PolyCollection); a reading without a strip is drawn as a point. Coloured by
-    `values` (with cmap / vmin / vmax) or in one `color`. Returns the mappable (the collection, else the scatter)."""
+    `values` (with cmap / vmin / vmax, or cmap / norm) or in one `color`. Returns the mappable (the collection, else
+    the scatter)."""
     from matplotlib.collections import PolyCollection
     quads = np.asarray(quads, float)
     x = np.asarray(x, float)
@@ -2855,14 +2877,18 @@ def _strips(ax, quads, x, y, values=None, cmap=None, vmin=None, vmax=None, color
         if v is not None:
             pc.set_array(v[ok])
             pc.set_cmap(cmap)
-            pc.set_clim(vmin, vmax)
+            if norm is not None:
+                pc.set_norm(norm)
+            else:
+                pc.set_clim(vmin, vmax)
         else:
             pc.set_facecolor(color)
         ax.add_collection(pc, autolim=False)
         mp = pc
     if rest.any():
-        sc = ax.scatter(x[rest], y[rest], c=(v[rest] if v is not None else color), s=s, cmap=cmap, vmin=vmin,
-                        vmax=vmax, linewidths=0, rasterized=True, zorder=zorder)
+        sc = ax.scatter(x[rest], y[rest], c=(v[rest] if v is not None else color), s=s, cmap=cmap,
+                        **({"norm": norm} if norm is not None else {"vmin": vmin, "vmax": vmax}), linewidths=0,
+                        rasterized=True, zorder=zorder)
         mp = mp or sc
     return mp
 
@@ -2965,6 +2991,8 @@ def figures(g, R, diag, ycol, tag, out):
     files["map"] = os.path.join(out, "fig_clean_map.png")
     fig.savefig(files["map"], bbox_inches="tight")
     plt.close(fig)
+    # ---- the final map, the combines before / after their factor and the seams (v2.6.1)
+    files.update(figures_maps(g, R, diag, tag, out, q_fin, fx, fy, x_, y_, x0, y0, g["_ymap"].to_numpy(float), ycol))
 
     # ---- F8: dose-response and sensitivity (three panels, one measure each)
     dose, th, sens = diag["dose"], diag["th_plot"], pd.DataFrame(diag["sens"])
@@ -3148,6 +3176,9 @@ def figures_sms(g, R, diag, tag, out):
     files["map"] = os.path.join(out, "fig_clean_map.png")
     fig.savefig(files["map"], bbox_inches="tight")
     plt.close(fig)
+    # ---- the final map, the combines before / after their factor and the seams (v2.6.1)
+    files.update(figures_maps(g, R, diag, tag, out, q_fin, fx, fy, x_, y_, x0, y0, y.to_numpy(float),
+                              f"{diag['C']['yield']} scaled by Optimize Swath Widths"))
 
     # ---- the steps
     cas = pd.DataFrame(R["cascade"])
@@ -3218,6 +3249,367 @@ def figures_sms(g, R, diag, tag, out):
 
 
 # ===================================================================================================== write
+# ---- the final, combine and seam maps (v2.6.1), for the OCCD and the SMS 3-sigma runs alike. The final map is the
+# column to map in DIFM read back from the DIFM-ready file (diag['final'], write_all); the combine map shows which
+# combine cut each strip and the yield before and after its factor; the seam map shows how much neighbouring passes
+# differ, inside one combine and between combines (engine/clean/machines.py, item 13). Every value drawn is a kept
+# reading's own value: no interpolation, no smoothing.
+COMBINE_COLORS = ["#00358E", "#F5A623", "#009CDE", "#00B373", "#7C3AED", "#E11D48", "#0F766E", "#A16207"]
+SEAM_COLORS = ["#FFE7A3", "#FDB44B", "#F4762E", "#D7263D", "#6E0B2A"]      # < 5, 5-10, 10-15, 15-20, >= 20 %
+STRIP_BG = "#E6ECF3"                                                        # the kept strips under the seams
+GATE_SHORT = {"ci_includes_1": "not applied: its CI includes 1", "too_few_pairs": "not applied: too few side-by-side "
+              "passes", "no_link": "not applied: no link to the reference", "above_max_factor": "not applied: above "
+              "10 %", "above_max_factor_unconfirmed": "not applied: above 10 %, not confirmed by the weight",
+              "below_min_factor": "not applied: below 1 %", "sizes_disagree": "not applied: 30 m and 50 m disagree",
+              "spatially_inconsistent": "not applied: it changes over the field"}
+
+
+def _outline(axes, g, diag):
+    """The field of interest (light blue) and the plots (grey) of the plan over the map axes."""
+    plan = diag.get("plan")
+    if plan is None:
+        return
+    rings = aoi_mod.outline_xy(plan, diag["utm"], float(np.nanmin(g._x)), float(np.nanmin(g._y)))
+    n_plot_rings = len(rings) - 1
+    for ax in axes:
+        for k, (rx, ry) in enumerate(rings):
+            last = k >= n_plot_rings or not plan.is_plan
+            ax.plot(rx, ry, color=LIGHT_BLUE if last else INK2, lw=1.4 if last else 0.45, alpha=1 if last else 0.7,
+                    zorder=5)
+
+
+def _map_axes(ax, ex, ey, left=True):
+    _extent(ax, ex, ey)
+    ax.set_aspect("equal")
+    ax.grid(False)
+    ax.set_xlabel("Easting from field corner (m)")
+    if left:
+        ax.set_ylabel("Northing from field corner (m)")
+    else:
+        ax.set_yticklabels([])
+
+
+def _panel_h(ex, ey, n, fig_w) -> float:
+    """The height (in) of one of n equal-aspect map panels side by side across fig_w inches (the colour bar and the
+    gaps take about 14 % of the width), between 2.8 and 7.5 in."""
+    xr = float(np.nanmax(ex) - np.nanmin(ex)) + 30.0
+    yr = float(np.nanmax(ey) - np.nanmin(ey)) + 30.0
+    return float(np.clip((0.86 * fig_w / n) * (yr / xr if xr > 0 else 1.0), 2.8, 7.5))
+
+
+def _align_cbar(cax, ax):
+    """Give the colour bar the height of its map once the map has its equal aspect."""
+    ax.apply_aspect()
+    p, c = ax.get_position(), cax.get_position()
+    cax.set_position([c.x0, p.y0, c.width, p.height])
+
+
+def _wrap(text: str, width: int) -> str:
+    import textwrap
+    return "\n".join(textwrap.wrap(text, width))
+
+
+def combine_order(g, keep, RM) -> tuple:
+    """(the combine of every reading, the combines with kept readings: the reference first, then by kept points)."""
+    mach = g["_machine"].astype(str).to_numpy()
+    cnt = pd.Series(mach[keep]).value_counts()
+    ref = str(RM.get("reference")) if RM.get("reference") is not None else None
+    names = ([ref] if ref in cnt.index else []) + [m for m in cnt.index if m != ref]
+    return mach, names
+
+
+def factor_label(RM: dict, m: str) -> str:
+    """The factor of combine m in a few words (the legend of the combine map)."""
+    fa = {str(k): float(v) for k, v in (RM.get("factor_applied") or {}).items()}
+    dec = str((RM.get("decision") or {}).get(m, ""))
+    if m == str(RM.get("reference")) and abs(fa.get(m, 1.0) - 1) <= 1e-12:
+        return "reference (x 1)"
+    if RM.get("per_machine_totals"):
+        return f"x {fa.get(m, 1.0):.4f} (its own scale ticket)"
+    if abs(fa.get(m, 1.0) - 1) > 1e-12:
+        return f"x {fa[m]:.4f} applied"
+    if dec.startswith("harmonisation switched off"):
+        return "x 1 (harmonisation switched off)"
+    if (RM.get("method_used") or {}).get(m) is None and m in (RM.get("method_used") or {}):
+        lc = ((RM.get("layout_class") or {}).get(m) or {}).get("local")
+        return "x 1 (not applied: " + ("they never harvested side by side)" if lc == "no_contact" else
+                                       "they harvested in blocks)")
+    t = machines_mod.primary_tests(RM.get("tests") or []).get(m) or {}
+    return "x 1 (" + GATE_SHORT.get(t.get("gate"), "not applied") + ")"
+
+
+def figure_combines(g, R, diag, tag, out, q, px, py, ex, ey, before, ylab):
+    """fig_clean_combines.png: which combine cut each kept strip, and the yield before and after the combine factor on
+    one colour scale (only the 'before' map when no factor other than 1 was applied). None with fewer than two
+    combines."""
+    RM = R.get("machines") or {}
+    keep = g.Keep.values == 1
+    mach, names = combine_order(g, keep, RM)
+    if len(names) < 2:
+        return None
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Patch
+    _style(plt)
+    fa = {str(k): float(v) for k, v in (RM.get("factor_applied") or {}).items()}
+    moved = any(abs(fa.get(m, 1.0) - 1) > 1e-12 for m in names)
+    after = g["Yld_Harm"].to_numpy(float)
+    before = np.asarray(before, float)
+    nmap = 3 if moved else 2
+    cmap = matplotlib.colormaps[YIELD_CMAP]
+    lo, hi = np.nanpercentile(before[keep], [2, 98])
+    fig_w = 15 if moved else 11.5
+    ph = _panel_h(ex, ey, nmap, fig_w)
+    ncol = 2 if len(names) > 2 else 1
+    leg_h = 0.3 * int(np.ceil(len(names) / ncol))
+    top_in, bottom_in = 1.15, 0.85 + leg_h
+    fig_h = top_in + ph + bottom_in
+    fig = plt.figure(figsize=(fig_w, fig_h))
+    gs = fig.add_gridspec(1, nmap + 1, width_ratios=[1] * nmap + [0.035], wspace=0.07, top=1 - top_in / fig_h,
+                          bottom=bottom_in / fig_h)
+    axs = [fig.add_subplot(gs[k]) for k in range(nmap)]
+    cax = fig.add_subplot(gs[nmap])
+    col = {m: COMBINE_COLORS[k % len(COMBINE_COLORS)] for k, m in enumerate(names)}
+    for m in names:
+        sel = keep & (mach == m)
+        _strips(axs[0], q[sel], px[sel], py[sel], color=col[m])
+    axs[0].set_title("Which combine cut each strip", loc="left")
+    sc = None
+    panels = [(axs[1], before, ("Before the factor" if moved else "No combine factor applied") + f"\n{ylab}")]
+    if moved:
+        panels.append((axs[2], after, "After the factor: Yld_Harm\n= the reading x its combine's factor"))
+    for ax, v, title in panels:
+        mp = _strips(ax, q[keep], px[keep], py[keep], v[keep], cmap, lo, hi)
+        sc = mp if mp is not None else sc
+        ax.set_title(title, loc="left")
+    for k, ax in enumerate(axs):
+        _map_axes(ax, ex, ey, left=(k == 0))
+    _outline(axs, g, diag)
+    cb = fig.colorbar(sc, cax=cax)
+    cb.outline.set_visible(False)
+    cb.set_label("bu/ac (one scale for both maps)", color=INK2)
+    _align_cbar(cax, axs[-1])
+    n_kept = pd.Series(mach[keep]).value_counts()
+    handles = [Patch(color=col[m], label=f"{m}: {factor_label(RM, m)}; {int(n_kept.get(m, 0)):,} kept points")
+               for m in names]
+    fig.legend(handles=handles, loc="upper left", bbox_to_anchor=(0.07, (leg_h + 0.1) / fig_h), ncol=ncol,
+               frameon=False, fontsize=9.5)
+    fig.suptitle(_wrap(f"{tag}: the combines and their factor. The factor is one number per combine, from the passes "
+                       "they cut side by side; the reference keeps its readings. Colour scale: 2nd-98th percentile of "
+                       "the kept readings before the factor", int(fig_w * 11)),
+                 x=0.07, y=0.995, ha="left", va="top", fontsize=11, color=INK)
+    path = os.path.join(out, "fig_clean_combines.png")
+    fig.savefig(path, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
+def figure_seams(g, R, diag, tag, out, q, px, py, ex, ey, x0, y0):
+    """fig_clean_seams.png: the seams between neighbouring passes as 50 m stretches coloured by how much the two
+    passes differ, for the passes of one combine and for the passes of different combines (before and, when a factor
+    moved them, after the factor), with the share of the stretches in each class below. None without the seam
+    diagnostic (one combine)."""
+    RM = R.get("machines") or {}
+    S, B = RM.get("seams"), diag.get("seams")
+    if not S or B is None:
+        return None
+    import textwrap
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.collections import LineCollection
+    from matplotlib.colors import BoundaryNorm, ListedColormap
+    _style(plt)
+    keep = g.Keep.values == 1
+    cross = (B["ma"].astype(str) != B["mb"].astype(str)).to_numpy() if len(B) else np.zeros(0, bool)
+    moved = bool(S["different_combines"].get("factor_moved_them"))
+    L = f"{S['stretch_m']:g} m"
+    panels = [("same", ~cross, "lr_before", "SAME combine", S["same_combine"]),
+              ("diff", cross, "lr_before", "DIFFERENT combines" + (", before the factor" if moved else ""),
+               S["different_combines"]["before"])]
+    if moved:
+        panels.append(("after", cross, "lr_after", "DIFFERENT combines, after the factor",
+                       S["different_combines"]["after"]))
+    n = len(panels)
+    bounds = [0.0] + [float(c) for c in S["classes_pct"]] + [1e9]
+    lcmap = ListedColormap(SEAM_COLORS)
+    norm = BoundaryNorm(bounds, lcmap.N)
+    fig_w = 15 if n == 3 else 11.5
+    ph = _panel_h(ex, ey, n, fig_w)
+    bars_h = 0.55 * n + 0.6
+    top_in, gap_in, bottom_in = 1.25, 1.0, 2.05
+    fig_h = top_in + ph + gap_in + bars_h + bottom_in
+    fig = plt.figure(figsize=(fig_w, fig_h))
+    outer = fig.add_gridspec(2, 1, height_ratios=[ph, bars_h], hspace=gap_in / ((ph + bars_h) / 2),
+                             top=1 - top_in / fig_h, bottom=bottom_in / fig_h)
+    top = outer[0].subgridspec(1, n + 1, width_ratios=[1] * n + [0.035], wspace=0.07)
+    axs = []
+    for k, (key, sel, colname, title, st) in enumerate(panels):
+        ax = fig.add_subplot(top[k])
+        axs.append(ax)
+        _strips(ax, q[keep], px[keep], py[keep], color=STRIP_BG)
+        Bs = B[sel]
+        if len(Bs):
+            segs = [np.asarray(ln, float) - np.array([x0, y0]) for ln in Bs["line"]]
+            lc = LineCollection(segs, cmap=lcmap, norm=norm, linewidths=2.4, capstyle="butt", zorder=3)
+            lc.set_array(machines_mod.seam_pct(Bs[colname]))
+            ax.add_collection(lc)
+        sub = (f"median {st['median_pct']:.1f} % · {st['stretches']:,} stretch{'es' if st['stretches'] != 1 else ''}"
+               f" · {st['pass_pairs']} pass pair{'s' if st['pass_pairs'] != 1 else ''}"
+               if st["stretches"] else "no neighbouring passes")
+        ax.set_title(f"{title}\n{sub}", loc="left", fontsize=10)
+        _map_axes(ax, ex, ey, left=(k == 0))
+    _outline(axs, g, diag)
+    cax = fig.add_subplot(top[n])
+    sm_ = matplotlib.cm.ScalarMappable(norm=BoundaryNorm(list(range(len(SEAM_COLORS) + 1)), lcmap.N), cmap=lcmap)
+    cb = fig.colorbar(sm_, cax=cax, ticks=[k + 0.5 for k in range(len(SEAM_COLORS))])
+    edges = [f"{c:g}" for c in S["classes_pct"]]
+    cb.ax.set_yticklabels([f"< {edges[0]} %"] + [f"{a}-{b} %" for a, b in zip(edges[:-1], edges[1:])]
+                          + [f"≥ {edges[-1]} %"])
+    cb.outline.set_visible(False)
+    cb.set_label("difference: the higher pass above the lower one", color=INK2)
+    _align_cbar(cax, axs[-1])
+    # the share of the stretches in each class, one bar per map
+    ax = fig.add_subplot(outer[1])
+    labels = {"same": "same combine", "diff": "different combines" + (", before" if moved else ""),
+              "after": "different combines, after"}
+    yy = np.arange(n)[::-1]
+    for yi, (key, sel, colname, title, st) in zip(yy, panels):
+        left = 0.0
+        for c, share in enumerate(st.get("class_shares_pct") or []):
+            ax.barh(yi, share, left=left, color=SEAM_COLORS[c], height=0.62, edgecolor="white", linewidth=0.8,
+                    zorder=3)
+            if share >= 7:
+                ax.text(left + share / 2, yi, f"{share:.0f} %", ha="center", va="center", fontsize=8.5,
+                        color="white" if c >= 2 else INK, zorder=4)
+            left += share
+        ax.text(101.5, yi, (f"median {st['median_pct']:.1f} %, {st['share_above_10_pct']:.0f} % of the stretches "
+                            "above 10 %" if st["stretches"] else "none"), va="center", fontsize=9, color=INK2)
+    ax.set_yticks(yy, [labels[p[0]] for p in panels])
+    ax.set_xlim(0, 100)
+    ax.set_xlabel("share of the stretches (%)")
+    ax.grid(axis="y", visible=False)
+    ax.set_title(f"How much neighbouring passes differ along {L} stretches", loc="left", fontsize=10)
+    fig.text(0.07, 1.35 / fig_h, "\n".join(textwrap.wrap(S.get("text") or "", int(fig_w * 14.5))), ha="left",
+             va="top", fontsize=9, color=INK2)
+    fig.suptitle(_wrap(f"{tag}: the seams between neighbouring passes. Each line is {L} of the seam between two "
+                       "passes, coloured by how much they differ there (the mean of the kept readings on each side, "
+                       "the yield as mapped)", int(fig_w * 11)), x=0.07, y=0.995, ha="left", va="top", fontsize=11,
+                 color=INK)
+    path = os.path.join(out, "fig_clean_seams.png")
+    fig.savefig(path, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
+def final_applied_text(R: dict) -> list:
+    """What the column to map in DIFM carries, in three short lines (filters, combine factor, level)."""
+    col = R.get("yield_column_for_difm")
+    RM, L, A = R.get("machines") or {}, R.get("level") or {}, R.get("aoi") or {}
+    lines = [f"Filters: {R['n_in'] - R['n_kept']:,} of {R['n_in']:,} readings removed ({R['removed_pct']:.1f} %)"
+             + (f"; {int(A['n_output_outside_aoi']):,} kept points outside the field of interest left out"
+                if A.get("n_output_outside_aoi") and A.get("clip_output", True) else "")]
+    leveled = col is not None and col in (R.get("level_column_for_difm"), R.get("level_sym_column_for_difm"))
+    harm_col = leveled or col == "Yld_Harm" or (col is not None and col != (R.get("columns") or {}).get("yield"))
+    fa = {str(k): float(v) for k, v in (RM.get("factor_applied") or {}).items()}
+    on = [f"{m} x {f:.4f}" for m, f in fa.items() if abs(f - 1) > 1e-12]
+    if not RM:
+        lines.append("Combine factor: one combine, nothing to harmonise")
+    elif not harm_col:
+        lines.append("Combine factor: not in this column")
+    elif on:
+        lines.append("Combine factor: " + ", ".join(on) + ("; the others x 1" if len(on) < len(fa) else ""))
+    else:
+        lines.append("Combine factor: none applied (every combine x 1; see the combines section)")
+    if leveled and L.get("per_machine"):
+        lines.append("Level: each combine leveled to its own scale ticket (per-machine L)")
+    elif leveled and L.get("factor_final") is not None:
+        lines.append(f"Level: x L = {float(L['factor_final']):.4f} to the grower's weight")
+    elif L:
+        lines.append(f"Level: not in this column ({R.get('level_column_for_difm') or 'Yld_Level'} carries it)")
+    else:
+        lines.append("Level: no grower's weight given, so the map is not leveled to a scale")
+    return lines
+
+
+def figure_final(g, R, diag, tag, out, q, px, py, ex, ey):
+    """fig_clean_final.png: the map to upload, the column to map in DIFM over the points of the DIFM-ready file as
+    the file holds them (diag['final']), colours centred on the field mean, with the distribution of the values as
+    the legend. None when the column has no finite value."""
+    Fz = diag.get("final")
+    if not Fz:
+        return None
+    pos = np.asarray(Fz["pos"], np.int64)
+    v = np.asarray(Fz["values"], float)
+    ok = np.isfinite(v)
+    if not ok.any():
+        return None
+    import textwrap
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import TwoSlopeNorm
+    _style(plt)
+    vv = v[ok]
+    mean = float(vv.mean())
+    lo, hi = (float(t) for t in np.percentile(vv, [2, 98]))
+    span = max(abs(mean), 1e-9) * 1e-3
+    lo, hi = min(lo, mean - span), max(hi, mean + span)
+    norm = TwoSlopeNorm(vcenter=mean, vmin=lo, vmax=hi)
+    cmap = matplotlib.colormaps[YIELD_CMAP]
+    fig = plt.figure(figsize=(13, 8.8))
+    gs = fig.add_gridspec(1, 2, width_ratios=[1, 0.3], wspace=0.16)
+    ax, hx = fig.add_subplot(gs[0]), fig.add_subplot(gs[1])
+    _strips(ax, q[pos], px[pos], py[pos], v, cmap, norm=norm)
+    _map_axes(ax, ex, ey)
+    _outline([ax], g, diag)
+    col = Fz["column"]
+    ax.set_title(f"{col}: the {len(v):,} points of the DIFM-ready file", loc="left")
+    # the legend: the distribution of the values, each bar in the colour of its value
+    edges = np.linspace(lo, hi, 41)
+    cnt, _ = np.histogram(np.clip(vv, lo, hi), bins=edges)
+    mids = (edges[:-1] + edges[1:]) / 2
+    hx.barh(mids, 100 * cnt / cnt.sum(), height=np.diff(edges), color=cmap(norm(mids)), edgecolor="none", zorder=3)
+    hx.axhline(mean, color=INK, lw=1.2, zorder=4)
+    hx.text(hx.get_xlim()[1] * 0.98, mean, f"mean {mean:,.1f}", ha="right", va="bottom", fontsize=8.5, color=INK,
+            zorder=5)
+    hx.set_ylim(lo, hi)
+    hx.set_ylabel(f"{col} (bu/ac)")
+    hx.set_xlabel("share of the points (%)")
+    hx.grid(axis="y", visible=False)
+    sec = hx.secondary_yaxis("right", functions=(lambda t: 100 * t / mean, lambda p: p * mean / 100))
+    sec.set_ylabel("% of the field mean", color=INK2)
+    hx.set_title("Values (the legend)", loc="left", fontsize=10)
+    sd = float(vv.std(ddof=1)) if len(vv) > 1 else 0.0
+    stats_ = (f"mean {mean:,.1f} · median {float(np.median(vv)):,.1f} · SD {sd:,.1f} bu/ac · CV "
+              f"{100 * sd / mean:.1f} %" if mean > 0 else f"mean {mean:,.1f} bu/ac")
+    note = ("Yellow = the field mean, red below it, green above (scale: 2nd-98th percentile; the end bars hold the "
+            f"values beyond it). Every strip is one point of the file with its own value: {Fz['source']}.")
+    lines = final_applied_text(R)
+    fig.text(0.07, 0.035, "\n".join([stats_] + lines + textwrap.wrap(note, 150)), ha="left", va="top", fontsize=9.5,
+             color=INK2, linespacing=1.5)
+    fig.suptitle(f"{tag}: final map, the yield to map in DIFM ({col}); what it carries is written below the map",
+                 x=0.07, y=0.97, ha="left", fontsize=12, color=INK)
+    path = os.path.join(out, "fig_clean_final.png")
+    fig.savefig(path, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
+def figures_maps(g, R, diag, tag, out, q, px, py, ex, ey, x0, y0, before, ylab) -> dict:
+    """The final, combine and seam maps of a run, {name: path} of those written (figure_final, figure_combines,
+    figure_seams). q / px / py: the kept strips and final positions, ex / ey: the extent, (x0, y0): the origin."""
+    files = {}
+    for name, fn in (("final", lambda: figure_final(g, R, diag, tag, out, q, px, py, ex, ey)),
+                     ("combines", lambda: figure_combines(g, R, diag, tag, out, q, px, py, ex, ey, before, ylab)),
+                     ("seams", lambda: figure_seams(g, R, diag, tag, out, q, px, py, ex, ey, x0, y0))):
+        p = fn()
+        if p:
+            files[name] = p
+    return files
+
+
 def _json_default(v):
     if hasattr(v, "item"):
         return v.item()
@@ -3469,6 +3861,34 @@ def write_all(path, out, tag, S, g0, g, gx, gy, R, diag, log=print):
     R["n_in_file"] = R["n_read"]
     R["output_crs"] = "EPSG:4326" if reproject else (g0.crs.to_string() if g0.crs is not None else None)
     R["advice"] = advice(R)
+    # ---- the final map (fig_clean_final): the column to map in DIFM over the DIFM-ready points, read back from the
+    # DIFM-ready file itself (the values as written when it cannot be read)
+    fcol = R["yield_column_for_difm"]
+    pos_g = o[keep_pos]                                  # the DIFM-ready points as positions in the processed table
+    fvals = fsrc = None
+    try:
+        import pyogrio
+        fv = pyogrio.read_dataframe(F["difm_ready_shp"], columns=[fcol], read_geometry=False)[fcol]
+        fv = pd.to_numeric(fv, errors="coerce").to_numpy(float)
+        if len(fv) == len(pos_g):
+            fvals, fsrc = fv, "the values read back from the DIFM-ready file"
+    except Exception:                                    # recorded in R['final_map']['values_from']
+        pass
+    if fvals is None:
+        icol = {v: k for k, v in ren.items()}.get(fcol, fcol)
+        fvals = G[icol if icol in ("Yld_Harm", "Yld_Level", "Yld_Lvl_Sy") else "_ymap"].to_numpy(float)[keep_pos]
+        fsrc = "the values written to the DIFM-ready file"
+    diag["final"] = {"pos": pos_g, "values": fvals, "column": fcol, "source": fsrc}
+    fok = np.isfinite(fvals)
+    if fok.any():
+        fv_ = fvals[fok]
+        fsd = float(fv_.std(ddof=1)) if len(fv_) > 1 else 0.0
+        R["final_map"] = {"column": fcol, "n_points": int(len(fvals)), "n_finite": int(fok.sum()),
+                          "mean": float(fv_.mean()), "median": float(np.median(fv_)), "sd": fsd,
+                          "cv_pct": (100 * fsd / float(fv_.mean()) if fv_.mean() > 0 else None),
+                          "p2": float(np.percentile(fv_, 2)), "p98": float(np.percentile(fv_, 98)),
+                          "min": float(fv_.min()), "max": float(fv_.max()), "values_from": fsrc,
+                          "applied": final_applied_text(R)}
     log("  figures ...")
     F["figures"] = figures_sms(g, R, diag, tag, out) if sms else figures(g, R, diag, C["yield"], tag, out)
     F["json"] = os.path.join(out, tag + "_cleaning.json")

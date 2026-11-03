@@ -2879,22 +2879,29 @@ def show_result(R: dict, where: str = "results"):
         st.caption("Output folder")
         st.code(F["dir"], language=None, wrap_lines=True)
         if sms_r:
-            labels = ["Map", "Limits", "Steps", "Sessions", "Combines", "Field of interest", "Limits per group",
-                      "Steps table"]
-            figkeys = ["map", "limits", "cascade"]
+            labels = ["Final map", "Cleaning map", "Limits", "Steps", "Sessions", "Combines and seams",
+                      "Field of interest", "Limits per group", "Steps table"]
+            figkeys = ["final", "map", "limits", "cascade"]
         else:
-            labels = ["Map", "Overlap dose-response", "Cascade", "Flow delay", "Sessions", "Combines",
-                      "Field of interest", "Cascade table"]
-            figkeys = ["map", "f8", "cascade", "lag"]
+            labels = ["Final map", "Cleaning map", "Overlap dose-response", "Cascade", "Flow delay", "Sessions",
+                      "Combines and seams", "Field of interest", "Cascade table"]
+            figkeys = ["final", "map", "f8", "cascade", "lag"]
         t = st.tabs(labels)
         nf = len(figkeys)
         for tab, k in zip(t[:nf], figkeys):
             with tab:
+                if k == "final":
+                    fm = R.get("final_map") or {}
+                    if fm:
+                        st.caption(f"**{fm.get('column')}**, the column to map in DIFM, over the {int(fm['n_points']):,} "
+                                   f"points of the DIFM-ready file: mean {fm['mean']:,.1f} · median {fm['median']:,.1f} · "
+                                   f"SD {fm['sd']:,.1f} bu/ac" + (f" · CV {fm['cv_pct']:.1f} %" if fm.get("cv_pct") else "")
+                                   + ". " + ". ".join(fm.get("applied") or []) + ".")
                 if figs.get(k) and os.path.exists(figs[k]):
                     st.image(figs[k])
-                else:
+                elif k != "final":
                     st.caption("figure not written")
-                if k == "map" and F.get("difm_ready_shp") and os.path.exists(F["difm_ready_shp"]):
+                if k == "final" and F.get("difm_ready_shp") and os.path.exists(F["difm_ready_shp"]):
                     ycol = er.recommended_yield_column(R)[0]
                     rd = shp_info(F["difm_ready_shp"], mtime(F["difm_ready_shp"]))
                     ycol = ycol if ycol in rd["fields"] else None
@@ -2972,6 +2979,7 @@ def show_result(R: dict, where: str = "results"):
                            f"with the method **{FACTOR_LABEL.get(req_, req_)}**.")
                 with st.expander("How the factor is computed (the rule of this run)", icon=":material/rule:"):
                     st.caption(RM.get("method") or RM.get("rule") or "-")
+                show_seams(RM, figs)
                 lay_ = RM.get("layout") or []
                 if lay_:
                     st.markdown("**How the combines shared the field**")
@@ -3126,9 +3134,49 @@ def show_result(R: dict, where: str = "results"):
                 st.dataframe(pd.DataFrame(R["cascade"])[["filter", "name", "on", "criterion", "removed", "remaining",
                                                          "source"]], hide_index=True)
         else:
-            with t[7]:
+            with t[nf + 3]:
                 st.dataframe(pd.DataFrame(R["cascade"])[["filter", "name", "on", "criterion", "removed", "remaining",
                                                          "source"]], hide_index=True)
+
+
+def show_seams(RM: dict, figs: dict):
+    """The seam map (how much neighbouring passes differ, inside one combine and between combines) and the combine
+    map (which combine cut each strip, the yield before and after its factor) of a run with several combines."""
+    SE = RM.get("seams") or {}
+    if SE.get("text"):
+        st.info(SE["text"], icon=":material/compare_arrows:")
+    if figs.get("seams") and os.path.exists(figs["seams"]):
+        st.markdown("**Seam map: how much neighbouring passes differ**")
+        st.image(figs["seams"])
+    if SE:
+        sc, db = SE["same_combine"], SE["different_combines"]["before"]
+        da, moved = SE["different_combines"]["after"], SE["different_combines"].get("factor_moved_them")
+        rows = [("same combine", sc), ("different combines" + (", before the factor" if moved else ""), db)]
+        if moved:
+            rows.append(("different combines, after the factor", da))
+        st.dataframe(pd.DataFrame([{"neighbouring passes": lab, "stretches": st_.get("stretches"),
+                                    "pass pairs": st_.get("pass_pairs"), "median difference (%)": st_.get("median_pct"),
+                                    "stretches above 10 % (%)": st_.get("share_above_10_pct")} for lab, st_ in rows]),
+                     hide_index=True, column_config={c: st.column_config.NumberColumn(format="%.1f") for c in
+                                                     ("median difference (%)", "stretches above 10 % (%)")})
+        pr = SE.get("pairs") or []
+        if pr:
+            dfp = pd.DataFrame([{"combine a": p["a"], "combine b": p["b"], "stretches": p["stretches"],
+                                 "pass pairs": p["pass_pairs"], "median difference (%)": p["median_pct_before"],
+                                 **({"after the factor (%)": p["median_pct_after"]} if moved else {}),
+                                 "a over b (%)": p["a_over_b_pct_before"],
+                                 **({"a over b after (%)": p["a_over_b_pct_after"]} if moved else {})} for p in pr])
+            st.dataframe(dfp, hide_index=True,
+                         column_config={c: st.column_config.NumberColumn(format="%+.1f" if "over" in c else "%.1f")
+                                        for c in dfp.columns if "(%)" in c})
+        st.caption(f"A stretch is {SE.get('stretch_m', 50):g} m of the seam between two neighbouring passes; its "
+                   "difference is how much the higher side reads above the lower one (the mean of the kept readings "
+                   "on each side). a over b = the median signed difference at the seams of that pair: the part a "
+                   "calibration difference would make the same on every seam. A diagnostic of the map: nothing is "
+                   "changed by it.")
+    if figs.get("combines") and os.path.exists(figs["combines"]):
+        st.markdown("**Which combine cut each strip, and the yield before and after the factor**")
+        st.image(figs["combines"])
 
 
 def show_comparison(C: dict | None, R: dict, R3: dict | None):
