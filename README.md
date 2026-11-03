@@ -178,7 +178,7 @@ otherwise it is immediate.
 | Case IH / New Holland AFS Pro 700 card (`.cn1`) | a folder with `index.vy1` starting with `CNH1` | the whole `<name>.cn1` folder (zipped, or its path on this computer); a partial copy of `.fld` folders is accepted with a warning |
 | John Deere Gen4 / G5 / X9 display logs (`.jdl`) | `.jdl` files anywhere under the input | the `JD-Data` folder of each combine, e.g. the Ops Center download: one `<VIN>_<date>.zip` per combine, all in one zip |
 | John Deere GreenStar 3 (2630) card (`.fdd` + `.fdl`) | `.fdl` files starting with `<RCDLogFile` with their `.fdd` | the `RCD/EIC/Documentation` folder (or the card above it); keep the `.fdr` load files to get load names |
-| **Field of interest** (optional, with any input above) | a polygon file: `.shp` (+ parts, or zipped; a zip that also holds guidance lines is fine, the polygon layer is read), `.geojson`, `.gpkg`, `.kml`, `.kmz`, in any coordinate system | the field boundary (one polygon; a field in several parts = one MultiPolygon feature) or the trial design: one polygon per plot plus the headland / border polygon (`type` = headland or border, or the single untyped polygon larger than 5 x the median plot), with the plot id in `plot` / `Plot_Id` / `id` / `Obj__Id` (else the row number) and the target rate in the first `tgt*` / `Tgt*` column or `rate` / `Rate_l` / `Tgt_Rate_l`. A file that holds **several field boundaries** (no rate / plot column, fewer than 4 polygons or polygons of unlike size) is not a design: the app asks which polygon is the field of interest (CLI `--aoi-feature N`) and never unions the fields |
+| **Field of interest** (optional, with any input above) | a polygon file: `.shp` (+ parts, or zipped; a zip that also holds guidance lines is fine, the polygon layer is read), `.geojson`, `.gpkg`, `.kml`, `.kmz`, in any coordinate system | the field boundary (one polygon; a field in several parts = one MultiPolygon feature) or the trial design: one polygon per plot plus the headland / border polygon (`type` = headland or border, or the single untyped polygon larger than 5 x the median plot), with the plot id in `plot` / `Plot_Id` / `id` / `Obj__Id` (else the row number) and the target rate in the first `tgt*` / `Tgt*` column or `rate` / `Rate_l` / `Tgt_Rate_l`. A file that holds **several field boundaries** (no rate / plot column, fewer than 4 polygons or polygons of unlike size) is not a design: the app asks which polygon(s) form the field of interest - one field, or every part of a field drawn as separate polygons, whose union is then the field (CLI `--aoi-feature N` or `N,M,...`) - and never unions the polygons by itself |
 
 The decoders write the same columns as an SMS / Ops Center export (`engine/formats/common.py`): Field, Dataset,
 Product, Obj__Id, Time (with time of day), Duration_s, Elevation_, Speed_mph_, Distance_f, Track_deg_, Swth_Wdth_,
@@ -480,8 +480,10 @@ type or it is the single untyped polygon (blank type, or no type column) larger 
 `Plot_Id` and `Tgt_Rate` are added, the F8 dose-response is measured on the in-plot records only (the review's
 interior figure, section 4.9) and the combine pairs compare the same plot. Otherwise the file holds **several field
 boundaries** (three quarters of one farm: 93, 121 and 135 ac, a `Field` column): the run refuses to union them and
-asks for the field of interest (`aoi.feature` = 1-based polygon index; CLI `--aoi-feature N`; the app shows a
-selector with the names and areas), and no `Plot_Id` is ever written from a boundary file. The level reports the
+asks for the field of interest (`aoi.feature` = 1-based polygon index, or a list of indices when the field is drawn
+in several polygons - split by a road or a creek - and the field of interest is their union; CLI `--aoi-feature N` or
+`N,M,...`; the app shows a multi-select with the names and areas and a *Select all* button), and no `Plot_Id` is ever
+written from a boundary file. The level reports the
 integral of the processed set (the ticket's denominator) and the integral inside the field (0 m), and **warns when the
 records set aside carry more than 5 % of the grain** (also with per-combine tickets): a field total of the whole export
 must not be divided by the integral of the trial area (Trial 29: the field total over the design area + 50 m gives L 1.77;

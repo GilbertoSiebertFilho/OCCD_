@@ -26,11 +26,13 @@ or 'rate', 'Rate_l', 'Tgt_Rate_l'), or an explicit plot column ('plot', 'Plot_Id
 border, or at least MIN_PLAN_POLYGONS (4) polygons of similar size (the largest, the headland excepted, below
 HEADLAND_RATIO (5) x the median). Otherwise the polygons are SEVERAL FIELD BOUNDARIES (a boundary file of the farm,
 e.g. three quarters of one farm): no Plot_Id is ever written from such a file, and the cleaning needs to know which
-field is the field of interest. With `feature` (1-based index of the polygon; settings aoi.feature, CLI --aoi-feature,
-the app's selector) that polygon alone is the AOI; without it the Plan is returned with `needs_choice` True, `fields`
-listing the polygons (index, name, area) and a warning, and the cleaning refuses to run on it (engine/clean/
-yield_clean.py), so the user picks one field instead of a silent union of fields. A single feature that is a
-MultiPolygon (one field in several parts) is one polygon and needs no choice.
+field is the field of interest. With `feature` (1-based index of the polygon, or a list of indices; settings
+aoi.feature, CLI --aoi-feature 2 or 1,2,3, the app's selector) those polygons are the AOI, their union when there are
+several (one field drawn as separate polygons: a field split by a road or a creek, or a quarter drawn in parts);
+without it the Plan is returned with `needs_choice` True, `fields` listing the polygons (index, name, area) and a
+warning, and the cleaning refuses to run on it (engine/clean/yield_clean.py), so the user picks the field instead of a
+silent union of fields. A single feature that is a MultiPolygon (one field in several parts) is one polygon and needs
+no choice.
 
 Plan details. Every polygon is a plot, except the polygons whose "type" / "Type" property matches aoi.headland_types
 (default "headland", "border"), or the single polygon without a type (blank, null or no type column) larger than
@@ -52,7 +54,7 @@ them farther than 50 m (the task named above, max 302 m), 29 within 0-50 m. tria
 polygons): 82 plots (tgt_seed 90-130 lb/ac, type "trial") + 1 polygon with type "headland"; plots cover 61.43 ac of
 the 106.26 ac union; the same file with the headland's type blank gives the same 82 + 1 (area rule, warning). A
 3-polygon boundary file (93, 121 and 135 ac, a 'Field' column, no rate) is three fields: needs_choice, and
-feature=2 gives the 121 ac quarter alone. These numbers are reproduced by tests/test_aoi_sessions_machines.py.
+feature=2 gives the 121 ac quarter alone, feature=[1, 2, 3] the union of the three (349 ac). These numbers are reproduced by tests/test_aoi_sessions_machines.py.
 """
 from __future__ import annotations
 
@@ -78,11 +80,49 @@ VECTOR_EXT = (".shp", ".geojson", ".json", ".gpkg", ".kml", ".kmz", ".gml", ".fg
 BLANK_TYPES = {"", "nan", "none", "null"}
 
 
+def feature_list(feature) -> list | None:
+    """The polygons chosen as the field of interest as a sorted list of 1-based indices: from an int, a list / tuple of
+    ints or a text such as '1,2,3' or '2'; None when nothing is chosen. Raises ValueError for anything else."""
+    if feature is None or (isinstance(feature, str) and not feature.strip()):
+        return None
+    items = feature if isinstance(feature, (list, tuple, set)) else str(feature).replace(";", ",").split(",")
+    out = []
+    for v in items:
+        if isinstance(v, bool):
+            raise ValueError(f"aoi.feature must be the 1-based index of a polygon of the file (or a list of them), not {feature!r}")
+        try:
+            f = float(str(v).strip())
+        except ValueError:
+            raise ValueError(f"aoi.feature must be the 1-based index of a polygon of the file (or a list of them), not "
+                             f"{feature!r}") from None
+        if f != int(f):
+            raise ValueError(f"aoi.feature must hold whole polygon numbers, not {feature!r}")
+        out.append(int(f))
+    if not out:
+        return None
+    return sorted(set(out))
+
+
+def feature_setting(feature):
+    """aoi.feature as it is written in the settings and the JSON: an int for one polygon (as before), a list for several,
+    None for none."""
+    fl = feature_list(feature)
+    return None if fl is None else (fl[0] if len(fl) == 1 else fl)
+
+
+def feature_text(feature) -> str:
+    """'polygon 2' / 'polygons 1, 2 and 3' for the messages."""
+    fl = feature_list(feature) or []
+    if len(fl) <= 1:
+        return f"polygon {fl[0]}" if fl else "no polygon"
+    return "polygons " + ", ".join(str(v) for v in fl[:-1]) + f" and {fl[-1]}"
+
+
 class Plan:
     """What read_plan returns. Geometries are kept in the file's CRS (`crs`); `to_utm` projects them once per CRS.
     is_plan: the polygons are plots (trial design); needs_choice: several field boundaries and no feature chosen;
-    feature: the 1-based index of the chosen polygon (None = all); fields: [{index, name, area_ac}] of the file's
-    polygons when it is not a plan."""
+    feature: the 1-based index of the chosen polygon, or the list of the chosen polygons when there are several (None =
+    all); fields: [{index, name, area_ac}] of the file's polygons when it is not a plan."""
 
     def __init__(self, file, gdf, id_col, rate_col, headland_mask, crs_note=None, warnings=None, is_plan=None,
                  feature=None, needs_choice=False, fields=None, n_in_file=None):
@@ -311,7 +351,8 @@ def is_plan_like(gdf, tcol, typed_headland: np.ndarray, rate_col, plot_col, area
 
 def read_plan(path, id_col=None, rate_col=None, headland_types=("headland", "border"), feature=None) -> Plan:
     """Read the field-of-interest / plan file. Raises ValueError when the file is missing, unreadable or holds no
-    polygon, or when `feature` (1-based polygon index) is out of range. See the module docstring for the rules."""
+    polygon, or when `feature` (a 1-based polygon index, or a list of them) is out of range. See the module docstring
+    for the rules."""
     path = os.path.abspath(str(path))
     if not os.path.exists(path):
         raise ValueError(f"field / plan file not found: {path}")
@@ -339,13 +380,13 @@ def read_plan(path, id_col=None, rate_col=None, headland_types=("headland", "bor
     headland = np.zeros(len(gdf), bool)
     idc = ratec = None
     is_plan, fields, needs_choice, chosen = False, [], False, None
-    if feature is not None:
-        try:
-            chosen = int(feature)
-        except (TypeError, ValueError):
-            raise ValueError(f"aoi.feature must be the 1-based index of a polygon of the file, not {feature!r}") from None
-        if not 1 <= chosen <= len(gdf):
-            raise ValueError(f"aoi.feature = {chosen} but {os.path.basename(path)} holds {len(gdf)} polygon(s)")
+    chosen_l = feature_list(feature)                       # the polygons chosen (1-based), None = no choice
+    if chosen_l is not None:
+        bad_k = [k for k in chosen_l if not 1 <= k <= len(gdf)]
+        if bad_k:
+            raise ValueError(f"aoi.feature = {feature_setting(feature)} but {os.path.basename(path)} holds {len(gdf)} "
+                             "polygon(s)")
+        chosen = chosen_l[0] if len(chosen_l) == 1 else chosen_l
     if len(gdf) > 1:
         tcol = next((c for c in cols if str(c).strip().lower() == "type"), None)
         types = {str(t).strip().lower() for t in (headland_types or [])}
@@ -392,14 +433,24 @@ def read_plan(path, id_col=None, rate_col=None, headland_types=("headland", "bor
                                 f"not a trial plan ({why}): choose the field of interest (aoi.feature 1..{len(gdf)}: "
                                 + "; ".join(f"{f['index']} = {f['name'] or 'polygon ' + str(f['index'])} "
                                             f"{f['area_ac']:,.1f} ac" for f in fields) + ")")
-            else:
+            elif len(chosen_l) == 1:
                 f = fields[chosen - 1]
                 warnings.append(f"field of interest = polygon {chosen} of {len(gdf)} in {os.path.basename(path)} "
                                 f"({f['name'] or 'no name'}, {f['area_ac']:,.1f} ac); the other polygons are ignored")
                 gdf = gdf.iloc[[chosen - 1]].reset_index(drop=True)
                 headland = np.zeros(1, bool)
-    elif chosen is not None and chosen != 1:
-        raise ValueError(f"aoi.feature = {chosen} but {os.path.basename(path)} holds one polygon")
+            else:
+                # several polygons chosen together: one field drawn in parts, the AOI is their union
+                sel = [fields[k - 1] for k in chosen_l]
+                warnings.append(f"field of interest = {feature_text(chosen_l)} of {len(gdf)} in {os.path.basename(path)}, "
+                                "together (" + "; ".join(f"{f['name'] or 'polygon ' + str(f['index'])} "
+                                                         f"{f['area_ac']:,.1f} ac" for f in sel)
+                                + f"; {sum(f['area_ac'] for f in sel):,.1f} ac in all)"
+                                + ("; the other polygons are ignored" if len(chosen_l) < len(gdf) else ""))
+                gdf = gdf.iloc[[k - 1 for k in chosen_l]].reset_index(drop=True)
+                headland = np.zeros(len(gdf), bool)
+    elif chosen_l is not None and chosen_l != [1]:
+        raise ValueError(f"aoi.feature = {feature_setting(feature)} but {os.path.basename(path)} holds one polygon")
     return Plan(path, gdf, idc, ratec, headland, crs_note, warnings, is_plan=is_plan, feature=chosen,
                 needs_choice=needs_choice, fields=fields, n_in_file=n_in_file)
 

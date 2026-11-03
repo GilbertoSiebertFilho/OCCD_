@@ -85,9 +85,10 @@ headland / border polygon). It is a **pre-step, not a filter**:
   same plot.
 - Otherwise the polygons are **several field boundaries** (a farm's boundary file: three quarters of one farm of 93,
   121 and 135 ac with a `Field` column). The run does not union them: it lists the polygons (index, name, area) and
-  needs the field of interest (`aoi.feature`, 1-based; CLI `--aoi-feature N`; a selector in the app) before it runs
-  on that polygon alone. No `Plot_Id` is written from a boundary file. A field drawn in several parts is one
-  MultiPolygon feature and needs no choice. The old `boundary` setting never tags plots, whatever the file holds.
+  needs the field of interest (`aoi.feature`, 1-based, or a list of indices; CLI `--aoi-feature N` or `N,M,...`; a
+  multi-select with *Select all* in the app) before it runs on that polygon alone, or on the union of the polygons
+  chosen together (one field drawn as separate polygons: split by a road or a creek). No `Plot_Id` is written from a
+  boundary file. A field drawn in several parts as one MultiPolygon feature needs no choice. The old `boundary` setting never tags plots, whatever the file holds.
 - The level reports the integral of the processed set (the ticket's denominator) and the integral inside the AOI
   (0 m); when the records set aside carry more than 5 % of the grain of the processed set, a warning gives the L the
   whole file would imply (section 7).

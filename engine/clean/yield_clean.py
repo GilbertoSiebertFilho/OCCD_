@@ -58,7 +58,8 @@ Steps
      (C 16) and Tgt_Rate (N 12.3) are added by point-in-polygon, the F8 dose-response is measured on the in-plot
      records only (interior ground; R['f8']['dose_population']) and the machine pairs compare the same plot. Otherwise
      it holds several field boundaries and the run refuses to union them until aoi.feature names the field of interest
-     (never a Plot_Id from a boundary file). The old 'boundary' setting is an alias for the v1 behaviour: level
+     (one polygon, or a list of polygons that together form the field: their union; never a Plot_Id from a boundary
+     file). The old 'boundary' setting is an alias for the v1 behaviour: level
      diagnostics inside the polygon(s), nothing dropped, clipped or tagged, whatever the number of polygons.
      settings crop (a key of engine.formats.common.CROPS) sets the F1 window (F1_CROP_RANGES, house conventions,
      only when the user did not set F1 min/max) and the fallback standard moisture.
@@ -316,7 +317,8 @@ DEFAULT_SETTINGS = {
     # this from the AOI are dropped before the cascade (null = no processing clip); clip_output: the DIFM-ready file
     # keeps only the kept records inside the AOI; id_col / rate_col: plot id and target-rate columns of a plan (null =
     # auto); headland_types: 'type' values that mark a headland / border polygon
-    # feature: 1-based index of the polygon to use when the file holds several field boundaries (not a plan)
+    # feature: 1-based index of the polygon to use when the file holds several field boundaries (not a plan), or a list
+    # of indices when the field is drawn in several polygons (the AOI is then their union)
     "aoi": {"file": None, "buffer_m": AOI_BUFFER_M, "clip_output": True, "id_col": None, "rate_col": None,
             "headland_types": ["headland", "border"], "feature": None},
     # standard moisture (null = decoder report > inferred from the export > crop table); shrink = how the mapped dry
@@ -612,7 +614,8 @@ def merge_settings(user=None) -> dict:
         if A[k] is not None and not isinstance(A[k], str):
             raise ValueError(f"aoi.{k} must be a column name or null, not {A[k]!r}")
     if A["feature"] is not None:
-        A["feature"] = _num(A["feature"], "i", "aoi.feature", 1, 100000)
+        fl = aoi_mod.feature_list(A["feature"])          # one polygon (int) or several (list), 1-based
+        A["feature"] = aoi_mod.feature_setting([_num(v, "i", "aoi.feature", 1, 100000) for v in fl]) if fl else None
     if isinstance(A["headland_types"], str):
         A["headland_types"] = [A["headland_types"]]
     if not isinstance(A["headland_types"], (list, tuple)) or not all(isinstance(t, str) for t in A["headland_types"]):
@@ -1594,7 +1597,8 @@ def clean(path, S, C, log=print, source=None):
             # several field boundaries in one file: the user picks the field of interest; a silent union would
             # clean several fields as one (the opposite of what the AOI is for)
             raise ValueError(f"{os.path.basename(A['file'])} holds {plan.n_fields} field boundaries, not a trial plan: "
-                             "choose the field of interest with aoi.feature (1-based polygon index; CLI --aoi-feature): "
+                             "choose the field of interest with aoi.feature (a 1-based polygon index, or a list of them "
+                             "for a field drawn in several polygons; CLI --aoi-feature 2 or 1,2,3): "
                              + "; ".join(f"{f['index']} = {f['name'] or 'polygon ' + str(f['index'])} "
                                          f"({f['area_ac']:,.1f} ac)" for f in plan.fields)
                              + ". A field drawn in several parts should be one MultiPolygon feature.")

@@ -943,13 +943,14 @@ def _aoi_module():
 
 
 def read_plan(path: str, id_col: str | None = None, rate_col: str | None = None, headland_types=None,
-              feature: int | None = None) -> dict:
+              feature=None) -> dict:
     """A boundary or trial-design polygon file -> {"gdf", "union", "n_polygons", "n_plots", "headland_polygons",
     "area_ac", "id_col", "rate_col", "rates", "crs", "is_plan", "needs_choice", "fields", "feature"} (the shared
     spec's read_plan). Delegates to engine.clean.aoi.read_plan when that module exists; otherwise the fallback below
     applies the same rules: AOI = union of the polygons; a file with > 1 polygon is a plan (plots) only when it has a
     rate column, a plot column, a polygon typed headland / border, or >= 4 polygons of similar size; otherwise it holds
-    several field boundaries and `feature` (1-based) picks one (needs_choice True until it does). In a plan the
+    several field boundaries and `feature` (1-based, or a list: their union) picks the field of interest
+    (needs_choice True until it does). In a plan the
     polygons whose 'type' / 'Type' matches headland_types (default headland, border), or the single untyped polygon
     larger than 5 x the median area, are the headland; id_col auto = plot / Plot_Id / id / Obj__Id (case-insensitive)
     else the row index 1..n; rate_col auto = the first column starting with 'tgt' or named rate / Rate_l /
@@ -1013,10 +1014,11 @@ def _read_plan_fallback(path, id_col=None, rate_col=None, headland_types=None, f
     head = np.zeros(n, bool)
     is_plan, fields, needs_choice, chosen, warnings = False, [], False, None, []
     n_in_file = n
-    if feature is not None:
-        chosen = int(feature)
-        if not 1 <= chosen <= n:
-            raise ValueError(f"aoi.feature = {chosen} but {os.path.basename(path)} holds {n} polygon(s)")
+    chosen_l = _feature_list(feature)
+    if chosen_l is not None:
+        if any(not 1 <= k <= n for k in chosen_l):
+            raise ValueError(f"aoi.feature = {feature} but {os.path.basename(path)} holds {n} polygon(s)")
+        chosen = chosen_l[0] if len(chosen_l) == 1 else chosen_l
     if n > 1:
         typed = np.zeros(n, bool)
         untyped = np.ones(n, bool)
@@ -1045,9 +1047,9 @@ def _read_plan_fallback(path, id_col=None, rate_col=None, headland_types=None, f
                 warnings.append(f"{os.path.basename(path)} holds {n} polygons that are several field boundaries, not a "
                                 f"trial plan: choose the field of interest (aoi.feature 1..{n})")
             else:
-                gdf = gdf.iloc[[chosen - 1]].reset_index(drop=True)
-                area_m2 = area_m2[[chosen - 1]]
-                n, head = 1, np.zeros(1, bool)
+                gdf = gdf.iloc[[k - 1 for k in chosen_l]].reset_index(drop=True)
+                area_m2 = area_m2[[k - 1 for k in chosen_l]]
+                n, head = len(chosen_l), np.zeros(len(chosen_l), bool)
     if id_col is None and is_plan:
         id_col = next((lower[c] for c in _PLAN_ID_COLS if c in lower), None)
     elif id_col is not None and id_col not in gdf.columns:
@@ -1073,6 +1075,26 @@ def _read_plan_fallback(path, id_col=None, rate_col=None, headland_types=None, f
             "rate_col": rate_col, "rates": rates, "crs": str(gdf.crs), "is_plan": is_plan, "needs_choice": needs_choice,
             "fields": fields, "feature": chosen, "n_fields": (0 if is_plan else len(fields) or n), "n_in_file": n_in_file,
             "warnings": warnings}
+
+
+def _feature_list(feature):
+    """aoi.feature as a sorted list of 1-based polygon indices (engine.clean.aoi.feature_list when it exists)."""
+    mod = _aoi_module()
+    if mod is not None and hasattr(mod, "feature_list"):
+        return mod.feature_list(feature)
+    if feature is None:
+        return None
+    items = feature if isinstance(feature, (list, tuple)) else str(feature).split(",")
+    return sorted({int(str(v).strip()) for v in items if str(v).strip()}) or None
+
+
+feature_list = _feature_list                 # public name (the app's polygon selector)
+
+
+def feature_setting(feature):
+    """aoi.feature as written in the settings: an int for one polygon, a list for several, None for none."""
+    fl = _feature_list(feature)
+    return None if fl is None else (fl[0] if len(fl) == 1 else fl)
 
 
 def plan_union_wgs84(plan: dict):
@@ -1273,8 +1295,9 @@ def main(argv=None) -> int:
                     ".geojson, .gpkg, .kml, .kmz). Records outside it + 50 m are dropped before the cascade, the DIFM "
                     "file is clipped to it, a design adds Plot_Id / Tgt_Rate; with raw data the units are chosen by "
                     "their share of readings inside it (>= 20 %%) instead of the monitor's field name")
-    ap.add_argument("--aoi-feature", type=int, default=None, metavar="N", help="when the --aoi file holds several "
-                    "field boundaries (not a trial plan): the 1-based index of the polygon that is the field of interest")
+    ap.add_argument("--aoi-feature", default=None, metavar="N[,M...]", help="when the --aoi file holds several "
+                    "field boundaries (not a trial plan): the 1-based index of the polygon that is the field of interest, "
+                    "or several indices separated by commas when the field is drawn in several polygons (their union)")
     ap.add_argument("--reference-machine", default=None, help="combine id used as the reference for the "
                     "harmonisation (default auto = the one with the most kept points)")
     ap.add_argument("--machine-total", action="append", default=None, metavar="VIN=BU",
@@ -1355,13 +1378,13 @@ def _cli(a) -> int:
                f"plot(s), {plan['headland_polygons']} headland polygon(s), {plan['area_ac']:,.1f} ac"
                + (f", rate column {plan['rate_col']} ({', '.join(format(r, 'g') for r in plan['rates'])})"
                   if plan["rate_col"] else "")
-               + (f" (polygon {plan['feature']} of {plan.get('n_in_file')} chosen with --aoi-feature)"
+               + (f" (polygon(s) {plan['feature']} of {plan.get('n_in_file')} chosen with --aoi-feature)"
                   if plan.get("feature") else ""))
         for w in plan.get("warnings") or []:
             _print("  note: " + str(w))
         if plan.get("needs_choice"):
             raise ValueError(f"{os.path.basename(a.aoi)} holds {plan['n_polygons']} field boundaries, not a trial plan: "
-                             "choose the field of interest with --aoi-feature N ("
+                             "choose the field of interest with --aoi-feature N, or N,M,... for a field drawn in several polygons ("
                              + "; ".join(f"{f['index']} = {f['name'] or 'polygon ' + str(f['index'])} "
                                          f"({f['area_ac']:,.1f} ac)" for f in plan.get("fields") or []) + ")")
     if a.list:
@@ -1443,7 +1466,7 @@ def _cli(a) -> int:
     if a.aoi:
         settings.setdefault("aoi", {})["file"] = os.path.abspath(a.aoi)
         if a.aoi_feature is not None:
-            settings["aoi"]["feature"] = int(a.aoi_feature)
+            settings["aoi"]["feature"] = feature_setting(a.aoi_feature)
     if a.crop:
         settings["crop"] = a.crop
     if a.standard_moisture is not None:

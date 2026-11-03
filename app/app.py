@@ -406,6 +406,11 @@ def request_aoi_from_widgets():
         st.toast("Upload a polygon file or type a path first", icon=":material/info:")
 
 
+def select_all_polygons(key: str, values: list):
+    """'Select all' of the polygon selector (a field drawn in several polygons): every polygon of the file."""
+    ss[key] = list(values)
+
+
 def clear_aoi():
     ss.aoi, ss.aoi_error, ss.aoi_exc, ss.aoi_preselect = None, None, None, None
 
@@ -529,10 +534,11 @@ def aoi_field_name(aoi) -> str | None:
     or a single-valued name-like attribute; None when the file names nothing (the Trial 19 boundary)."""
     if not aoi:
         return None
-    f = aoi.get("feature")
-    for x in aoi.get("fields") or []:
-        if f and x.get("index") == f and str(x.get("name") or "").strip():
-            return str(x["name"]).strip()
+    fl = er.feature_list(aoi.get("feature")) or []
+    names = [str(x.get("name") or "").strip() for x in (aoi.get("fields") or []) if x.get("index") in fl]
+    names = list(dict.fromkeys(n for n in names if n and n.lower() != "nan"))
+    if names:                                   # one field, or the parts of one field drawn in several polygons
+        return names[0] if len(names) == 1 else " + ".join(names)
     gdf = (aoi.get("plan") or {}).get("gdf")
     if gdf is None:
         return None
@@ -890,7 +896,7 @@ def _restore_field(rec: dict, workdir: str):
         if ap and os.path.exists(ap):
             do_load_aoi(("path", ap))
             if ss.aoi is not None and A.get("feature") is not None:
-                ss[f"aoi_feature_{ss.aoi['key']}"] = int(A["feature"])
+                ss[f"aoi_feature_{ss.aoi['key']}"] = er.feature_list(A["feature"]) or []
             if ss.aoi is not None and inp.get("aoi_shares") and cand["kind"] == "raw":
                 ss.aoi_shares[(cand["probe"].root, ss.aoi["key"])] = dict(inp["aoi_shares"])
         else:
@@ -1755,29 +1761,42 @@ with st.container(border=True, key="occd_step_1"):                # the key is t
         aoi = ss.aoi
         aoi_pending = False
         if aoi is not None and aoi.get("needs_choice"):
-            # several field boundaries in one file: the user picks the field; the cleaning never unions fields
+            # several polygons that are not a trial plan: the user marks the polygon(s) of the field of interest - one
+            # field, or every part of one field drawn in several polygons (their union); never a silent union
             flds = aoi.get("fields") or []
             by_idx = {f["index"]: f for f in flds}
-            k = st.selectbox(f"{aoi['name']} holds {len(flds)} field boundaries (not a trial plan): which one is the "
-                             "field of interest?", [None] + [f["index"] for f in flds], key=f"aoi_feature_{aoi['key']}",
-                             format_func=lambda i: "choose a field ..." if i is None else
-                             f"{i}: {by_idx[i]['name'] or 'polygon ' + str(i)} ({by_idx[i]['area_ac']:,.1f} ac)")
-            if k is None:
+            fkey = f"aoi_feature_{aoi['key']}"
+            if ss.get(fkey) is not None and not isinstance(ss.get(fkey), list):     # one index (an older session)
+                ss[fkey] = er.feature_list(ss.get(fkey)) or []
+            with st.container(horizontal=True, vertical_alignment="bottom"):
+                sel = st.multiselect(
+                    f"{aoi['name']} holds {len(flds)} polygons (not a trial plan): which ones form the field of "
+                    "interest?", [f["index"] for f in flds], key=fkey, placeholder="choose one or more polygons ...",
+                    format_func=lambda i: f"{i}: {by_idx[i]['name'] or 'polygon ' + str(i)} ({by_idx[i]['area_ac']:,.1f} ac)",
+                    help="One polygon = one field. Several polygons = one field drawn in parts (split by a road, a "
+                         "creek, a yard ...): the field of interest is their union, and the map shows them all.")
+                st.button("Select all", icon=":material/select_all:", key=f"aoi_all_{aoi['key']}",
+                          on_click=select_all_polygons, args=(fkey, [f["index"] for f in flds]))
+            if not sel:
                 aoi_pending = True
-                st.warning("Choose the field of interest: the cleaning does not run on several fields at once (a "
-                           "field drawn in several parts should be one MultiPolygon feature).", icon=":material/warning:")
+                st.warning("Choose the polygon(s) of the field of interest: one field, or all the parts of a field "
+                           "drawn in several polygons (Select all: their union).", icon=":material/warning:")
             else:
+                feat = er.feature_setting(sel)
                 try:
-                    plan_k = er.read_plan(aoi["path"], feature=int(k))
-                    aoi = {**aoi, "plan": plan_k, "key": key_of(f"{aoi['path']}|{mtime(aoi['path'])}|{k}"),
+                    plan_k = er.read_plan(aoi["path"], feature=feat)
+                    aoi = {**aoi, "plan": plan_k, "key": key_of(f"{aoi['path']}|{mtime(aoi['path'])}|{feat}"),
                            **{kk: plan_k.get(kk) for kk in AOI_KEYS}}
                 except ValueError as e:
                     st.error(str(e), icon=":material/error:")
                     aoi_pending = True
         if aoi is not None:
+            fl_ = er.feature_list(aoi.get("feature")) or []
             kind = ("trial design" if aoi["n_plots"] else
                     f"{aoi.get('n_in_file') or aoi['n_polygons']} field boundaries" if aoi.get("needs_choice") else
-                    f"boundary, polygon {aoi['feature']} of {aoi.get('n_in_file')}" if aoi.get("feature") else "boundary")
+                    (f"boundary, polygon {fl_[0]} of {aoi.get('n_in_file')}" if len(fl_) == 1 else
+                     f"boundary, polygons {', '.join(map(str, fl_))} of {aoi.get('n_in_file')} together")
+                    if fl_ else "boundary")
             st.success(f"Field of interest: {aoi['name']} ({kind}, {aoi.get('crs') or 'no CRS'})", icon=":material/map:")
             with st.container(horizontal=True):
                 st.metric("Polygons", f"{aoi['n_polygons']:,}", border=True)
@@ -2492,7 +2511,7 @@ with st.container(border=True, key="occd_step_3"):
             S["machines"]["ticket_confirms"] = bool(ticket_confirms)
         if aoi is not None:
             S["aoi"] = {"file": aoi["path"], "buffer_m": float(aoi_buffer), "clip_output": bool(aoi_clip),
-                        "feature": (int(aoi["feature"]) if aoi.get("feature") else None)}
+                        "feature": er.feature_setting(aoi.get("feature"))}
         if method != "occd":                            # only when chosen: the OCCD settings stay exactly as before
             S["method"] = method
             S["sms3sigma"] = dict(sms_settings or {})
