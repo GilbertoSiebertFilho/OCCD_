@@ -87,11 +87,11 @@ Method (the numbers are house conventions unless cited)
      factor is applied with the decision "applied: the paired factor is above max_factor but the grower's weight
      confirms it (harmonised total within x % of the scale)"; otherwise nothing is applied and the decision says why.
      Reference case (tests/test_ticket.py): the 5-combine barley field, 5 GreenStar combines, ticket W lb = V bu
-     at 47.99 lb/bu; the monitor total is M bu (-5.2 %); combine E reads 0.7825 against the reference (CI
-     0.762-0.803, 396 cells), not applied under the 10 % gate; with it applied the total is V' bu, 0.07 % from
-     the ticket -> applied; the level factor goes from 0.9481 to 1.0007. The other machines (CIs including 1) are
-     unchanged. The test reads the primary test of the method used (primary_tests: the 30 m cells test, or the one
-     test of machine, track or point x point).
+     at 47.99 lb/bu; the monitor total is M bu (-5.2 %); combine E reads 0.7950 against the reference (CI
+     0.780-0.812, 1,187 cells, the network estimate), not applied under the 10 % gate; with it applied the total is
+     V' bu, 0.25 % from the ticket -> applied; the level factor goes from 0.9481 to 0.9975. The other machines (CIs
+     including 1) are unchanged. The test reads the primary test of the method used (primary_tests: the 30 m cells
+     test, or the one test of machine, track or point x point).
   9. Harvest layout (layout_pair; v2.6). How two combines shared the field decides which factor can be trusted, so it
      is measured first, on the kept points: adj_a = the share of the passes of combine a with >= ADJ_MIN_POINTS (10)
      points within D = ADJ_WIDTH_MULT (1.5) x the median header width of a point of b, adj_b the same for b, adjacency

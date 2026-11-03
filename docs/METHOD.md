@@ -618,9 +618,9 @@ lb and in bu, the test weight used and where it came from, the monitor total in 
   ticket test repeats it ("candidate A rejected: ..."), adding "try machines.reference = A" when the weight sits
   nearer that combine's level than the reference's (the closure can only scale the non-reference combines). The 5-combine field
   barley 2026 (5 combines, 130,847 readings, 47.99 lb/bu,
-  W lb = V bu): monitor M bu, L 0.9481; combine E at 0.7825 (CI 0.762-0.803, 396 cells)
-  was beyond the 10 % gate; with its factor the harmonised total is V' bu, 0.07 % from the scale, so the
-  factor is applied and the final L is 1.0007; the four other combines, whose CIs include 1, are unchanged.
+  W lb = V bu): monitor M bu, L 0.9481; combine E at 0.7950 (CI 0.780-0.812, 1,187 cells)
+  was beyond the 10 % gate; with its factor the harmonised total is V' bu, 0.25 % from the scale, so the
+  factor is applied and the final L is 0.9975; the four other combines, whose CIs include 1, are unchanged.
 - **When NOT to trust L.** The ticket covers several fields, or only part of this one (the run asks to check the
   coverage when |L - 1| > 10 %); the weight is net of dockage while the monitor is gross (or the reverse); the ticket
   is on another moisture basis than the comparison; loads were lost, double-counted or weighed elsewhere; the field

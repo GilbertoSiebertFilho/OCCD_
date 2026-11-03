@@ -130,7 +130,7 @@ Steps
      run asks for per-machine weights - unless the grower's weight confirms the factor (engine/clean/machines.py
      ticket_closure: the monitor total with the factor within machines.ticket_close_tol = 1 % of the ticket while the
      total without it is more than 3 % away -> applied, "the grower's weight confirms it"; the 5-combine field: combine E at
-     0.7825, total M -> V' bu against V bu, L 0.9481 -> 1.0007).
+     0.7950, total M -> V' bu against V bu, L 0.9481 -> 0.9975).
      Per-machine tickets (machines.totals_bu; applied whenever given, with or without
      the relative step, also for one machine) level every machine to its own ticket (Yld_Level = y x L_m, Yld_Harm =
      y x L_m / L_ref) and the paired estimate becomes a validation where it passes its own pair gate. Several combines

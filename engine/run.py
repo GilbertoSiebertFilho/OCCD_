@@ -482,7 +482,7 @@ def compared_ticket_bu(L: dict):
 
 
 def level_factor_text(L: dict) -> str:
-    """'1.0007 (before the combine harmonisation 0.9481)' / '1.1099': the level applied to the columns (factor_final)
+    """'0.9975 (before the combine harmonisation 0.9481)' / '1.1099': the level applied to the columns (factor_final)
     first, the pre-harmonisation factor only when a combine factor changed it."""
     f = L.get("factor")
     ff = L.get("factor_final")

@@ -217,9 +217,9 @@ SOURCES = {
     ],
     "machines": [
         {"key": "Maldaner 2016", "supports": "method",
-         "note": "reference = combine with largest area; others x one ratio from all points, the one pair of closest paths or the point pairs on it; nearest combine corrected first; judged by SD / CV and variograms (no weight); proceedings, not refereed"},
+         "note": "largest-area combine = reference; one ratio from all points or closest paths; nearest combine corrected first"},
         {"key": "Carneiro 2022", "supports": "method",
-         "note": "per-machine normalisation (yield / the machine's mean), merged, x the field's average sold yield: the machine x machine ratio, unbiased only when the combines cut the same mix of ground; extension article"},
+         "note": "yield / its combine's mean x the field's sold mean: the machine ratio; right only on the same ground mix"},
         {"key": "Chiocco 2019", "supports": "range",
          "note": "multi-harvester gain searched within +/- 10 % on nearest points of adjacent paths: OCCD's 10 % cap"},
         {"key": "Gauci 2023", "supports": "range",
@@ -239,7 +239,7 @@ SOURCES = {
 # 'house' comes before the first ' (' because the PDF table keeps only that part
 HOUSE_RULES = {
     "order": "lag scan after the cascade and the removal guardrails: house rules (published chains correct the delay first; advice above 60 % removed or when a filter removes > 50 % of its input; fewer than 30 kept points = no output; measuring the delay after F6 and applying it before F7 and F8 is an option, lag_stage before_f7, that failed its pre-registered test on 29 Oct 2026)",
-    "aoi": "the cut before the cleaning (the app: at the boundary, 0 m; the engine / CLI: a 50 m buffer), plan detection from >= 4 similar polygons and the headland as the polygon > 5 x the median area: house rules",
+    "aoi": "house cut before the cleaning (the app: at the boundary, 0 m; the engine / CLI: a 50 m buffer), plan detection from >= 4 similar polygons and the headland as the polygon > 5 x the median area: house rules",
     "F0": "position checks: house rule (no fix, (0,0), outside the lon/lat ranges, > 50 km from the median position)",
     "F1": "crop windows other than corn 10-33 %: house rule (barley, wheat, durum, oats, rye and no crop 8-20 %; canola, flax 4-16 %; peas 8-24 %; lentils 8-22 %; soybeans 8-25 %: floors below the published 10 %, ceilings below 33 %)",
     "F2": "1.5-6.5 mph window: house rule (one fixed window for every field, inside the published 0.7-8.2 mph)",
