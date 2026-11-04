@@ -508,7 +508,7 @@ def explorer(shp: str, key: str, title: str = "", height: int = 520, default: st
                               x2="to:Q", y=alt.Y("points:Q", title="points"),
                               tooltip=[alt.Tooltip("from:Q", format=".3~g"), alt.Tooltip("to:Q", format=".3~g"),
                                        "points:Q"]))
-                st.altair_chart(ch, use_container_width=True)
+                st.altair_chart(ch, width="stretch")
                 st.caption("Values beyond the scale are counted in the end bars.")
         else:
             st.caption("No point has a value.")
