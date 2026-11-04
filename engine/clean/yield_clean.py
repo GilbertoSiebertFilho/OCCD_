@@ -3503,15 +3503,21 @@ def figure_seams(g, R, diag, tag, out, q, px, py, ex, ey, x0, y0):
     return path
 
 
-def final_applied_text(R: dict) -> list:
-    """What the column to map in DIFM carries, in three short lines (filters, combine factor, level)."""
-    col = R.get("yield_column_for_difm")
+def final_applied_text(R: dict, col: str | None = None) -> list:
+    """What the column to map in DIFM (col, else R['yield_column_for_difm']) carries, in short lines (filters, the
+    moisture basis when it is the symmetric dry yield, combine factor, level)."""
+    col = col or R.get("yield_column_for_difm")
     RM, L, A = R.get("machines") or {}, R.get("level") or {}, R.get("aoi") or {}
     lines = [f"Filters: {R['n_in'] - R['n_kept']:,} of {R['n_in']:,} readings removed ({R['removed_pct']:.1f} %)"
              + (f"; {int(A['n_output_outside_aoi']):,} kept points outside the field of interest left out"
                 if A.get("n_output_outside_aoi") and A.get("clip_output", True) else "")]
+    sym = col is not None and col == R.get("dry_symmetric_column_for_difm")
+    if sym:
+        lines.append("Moisture basis: the symmetric dry-matter yield, wet yield x (100 - M) / (100 - Ms), as the "
+                     "harvest sessions recommend")
     leveled = col is not None and col in (R.get("level_column_for_difm"), R.get("level_sym_column_for_difm"))
-    harm_col = leveled or col == "Yld_Harm" or (col is not None and col != (R.get("columns") or {}).get("yield"))
+    harm_col = not sym and (leveled or col == "Yld_Harm"
+                            or (col is not None and col != (R.get("columns") or {}).get("yield")))
     fa = {str(k): float(v) for k, v in (RM.get("factor_applied") or {}).items()}
     on = [f"{m} x {f:.4f}" for m, f in fa.items() if abs(f - 1) > 1e-12]
     if not RM:
@@ -3586,7 +3592,7 @@ def figure_final(g, R, diag, tag, out, q, px, py, ex, ey):
               f"{100 * sd / mean:.1f} %" if mean > 0 else f"mean {mean:,.1f} bu/ac")
     note = ("Yellow = the field mean, red below it, green above (scale: 2nd-98th percentile; the end bars hold the "
             f"values beyond it). Every strip is one point of the file with its own value: {Fz['source']}.")
-    lines = final_applied_text(R)
+    lines = final_applied_text(R, Fz["column"])
     fig.text(0.07, 0.035, "\n".join([stats_] + lines + textwrap.wrap(note, 150)), ha="left", va="top", fontsize=9.5,
              color=INK2, linespacing=1.5)
     fig.suptitle(f"{tag}: final map, the yield to map in DIFM ({col}); what it carries is written below the map",
@@ -3862,8 +3868,15 @@ def write_all(path, out, tag, S, g0, g, gx, gy, R, diag, log=print):
     R["output_crs"] = "EPSG:4326" if reproject else (g0.crs.to_string() if g0.crs is not None else None)
     R["advice"] = advice(R)
     # ---- the final map (fig_clean_final): the column to map in DIFM over the DIFM-ready points, read back from the
-    # DIFM-ready file itself (the values as written when it cannot be read)
+    # DIFM-ready file itself (the values as written when it cannot be read). The column is the one the run tells the
+    # user to map (engine.run.recommended_yield_column: the leveled column, Yld_Harm, or Yld_Dry_Sy when the harvest
+    # sessions recommend the symmetric dry basis), so the figure, the app's map and the advice name the same column
     fcol = R["yield_column_for_difm"]
+    try:
+        from engine.run import recommended_yield_column
+        fcol = recommended_yield_column(R)[0] or fcol
+    except Exception:                                    # the engine's own choice when the advice cannot be read
+        pass
     pos_g = o[keep_pos]                                  # the DIFM-ready points as positions in the processed table
     fvals = fsrc = None
     try:
@@ -3876,7 +3889,8 @@ def write_all(path, out, tag, S, g0, g, gx, gy, R, diag, log=print):
         pass
     if fvals is None:
         icol = {v: k for k, v in ren.items()}.get(fcol, fcol)
-        fvals = G[icol if icol in ("Yld_Harm", "Yld_Level", "Yld_Lvl_Sy") else "_ymap"].to_numpy(float)[keep_pos]
+        fvals = G[icol if icol in ("Yld_Harm", "Yld_Level", "Yld_Lvl_Sy", "Yld_Dry_Sy") else "_ymap"].to_numpy(
+            float)[keep_pos]
         fsrc = "the values written to the DIFM-ready file"
     diag["final"] = {"pos": pos_g, "values": fvals, "column": fcol, "source": fsrc}
     fok = np.isfinite(fvals)
@@ -3888,7 +3902,7 @@ def write_all(path, out, tag, S, g0, g, gx, gy, R, diag, log=print):
                           "cv_pct": (100 * fsd / float(fv_.mean()) if fv_.mean() > 0 else None),
                           "p2": float(np.percentile(fv_, 2)), "p98": float(np.percentile(fv_, 98)),
                           "min": float(fv_.min()), "max": float(fv_.max()), "values_from": fsrc,
-                          "applied": final_applied_text(R)}
+                          "applied": final_applied_text(R, fcol)}
     log("  figures ...")
     F["figures"] = figures_sms(g, R, diag, tag, out) if sms else figures(g, R, diag, C["yield"], tag, out)
     F["json"] = os.path.join(out, tag + "_cleaning.json")
