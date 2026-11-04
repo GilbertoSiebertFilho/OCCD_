@@ -865,8 +865,7 @@ def preview_swaths(shp: str, ycol: str | None = None, n_max: int = PREVIEW_N_MAX
     longer than 1.5 x Distance + 0.3 m (a removed reading between two kept ones is not bridged) and at a heading
     change > 60 deg; a reading without a usable predecessor gets the rectangle, Distance back along the travel. An SMS
     3-sigma output (Swath_Scl) is drawn as SMS draws it: rectangles with the optimised width (swath_quads). The
-    strips are built on the whole file; a random n_max readings are returned when it holds more, each with `row`, its
-    record in the file. The width is the
+    strips are built on the whole file; a random n_max readings are returned when it holds more. The width is the
     file's width column (or Wdth_Opt), else `width_ft` (the settings' harvester width); the distance is the file's
     distance column, else speed x duration, as the engine does. The polygon column is absent when the strips cannot
     be built (no heading, no width, no distance, or no coordinate system: the engine refuses such a file itself), and
@@ -923,11 +922,9 @@ def preview_swaths(shp: str, ycol: str | None = None, n_max: int = PREVIEW_N_MAX
         ql = np.round(np.c_[np.asarray(qlon, float), np.asarray(qlat, float)].reshape(-1, 4, 2), 7)   # 1 cm
         valid = np.isfinite(ql).all(axis=(1, 2))
         out = out.iloc[rows].copy()
-        out["row"] = rows                         # the record of the file (OCED colours the strips by any attribute)
         out["polygon"] = [p.tolist() if v else None for p, v in zip(ql, valid)]
         return out.reset_index(drop=True)
-    out = out[ok].copy()
-    out["row"] = np.flatnonzero(ok)
+    out = out[ok]
     if len(out) > n_max:
         out = out.sample(n_max, random_state=seed)
     return out.reset_index(drop=True)
