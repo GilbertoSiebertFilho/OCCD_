@@ -11,6 +11,7 @@
 !docs/literature/references_verified.csv
 !assets/brand/*
 workspace/
+workspace_oced/
 _archive/
 examples/
 .venv/

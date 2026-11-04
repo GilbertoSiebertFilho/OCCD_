@@ -277,12 +277,13 @@ def step_header(num: int, title: str, subtitle: str = "") -> None:
                                              else "") + "</div></div>")
 
 
-def brand_block() -> None:
-    """The name, version and tagline of the title bar (white on navy)."""
+def brand_block(name: str | None = None, version: str | None = None, tagline: str | None = None) -> None:
+    """The name, version and tagline of the title bar (white on navy); OCED (app/oced.py) passes its own."""
     import html
     import streamlit as st
-    st.html(f'<div class="occd-brand"><div class="occd-brand-name">{html.escape(NAME)}<span class="occd-pill">'
-            f'v{html.escape(VERSION)}</span></div><div class="occd-brand-tag">{html.escape(TAGLINE)}</div></div>')
+    st.html(f'<div class="occd-brand"><div class="occd-brand-name">{html.escape(name or NAME)}<span class="occd-pill">'
+            f'v{html.escape(version or VERSION)}</span></div><div class="occd-brand-tag">'
+            f'{html.escape(tagline or TAGLINE)}</div></div>')
 
 
 def inject():

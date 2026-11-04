@@ -2,9 +2,10 @@
 rem OCCD - Olds College Cleaning Data: update this folder to the newest version on GitHub (branch main).
 rem Downloads https://github.com/GilbertoSiebertFilho/OCCD_/archive/refs/heads/main.zip, moves the current app,
 rem engine, docs, assets and .streamlit folders (and the root files README.md, INSTALAR.txt, requirements.txt,
-rem constraints.txt, run_app.bat, install_occd.bat) to _backup\<date-time>, puts the new ones in their place and
+rem constraints.txt, run_app.bat, run_oced.bat, install_occd.bat) to _backup\<date-time>, puts the new ones in
+rem their place and
 rem checks that the code compiles; on any failure the previous version is put back. Never touched: the saved fields
-rem (workspace), the Python environment (.venv), _archive, examples and this file itself.
+rem (workspace, workspace_oced), the Python environment (.venv), _archive, examples and this file itself.
 rem Close the app (its black window) before running this. Messages in Portuguese without accents (any code page).
 setlocal EnableExtensions
 cd /d "%~dp0"
@@ -12,7 +13,7 @@ set "URL=https://github.com/GilbertoSiebertFilho/OCCD_/archive/refs/heads/main.z
 set "TMPZIP=%TEMP%\occd_main.zip"
 set "TMPDIR=%TEMP%\occd_update"
 set "DIRS=app engine docs assets .streamlit"
-set "FILES=README.md INSTALAR.txt requirements.txt constraints.txt run_app.bat install_occd.bat"
+set "FILES=README.md INSTALAR.txt requirements.txt constraints.txt run_app.bat run_oced.bat install_occd.bat"
 set "BAK="
 echo.
 echo  OCCD - atualizacao a partir do GitHub, versao main
@@ -79,6 +80,7 @@ echo  Pronto: OCCD %VER% instalado nesta pasta.
 echo  A versao anterior ficou guardada em %BAK% - pode apagar essa pasta quando quiser.
 if "%NEEDPIP%"=="1" goto needpip
 echo  Nenhum pacote novo do Python: abra o app com run_app.bat como sempre.
+if exist "app\oced.py" echo  O OCED - extrair dados brutos e limpar so com o 3 sigma - abre com run_oced.bat.
 echo.
 pause
 exit /b 0

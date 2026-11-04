@@ -83,6 +83,24 @@ stops and asks for `--candidate N`. Each call unpacks into its own `input/` (`in
 reused), so a reused `--out` never picks up an earlier input. Exit codes: 0 done, 2 a problem the user can fix (the
 message says what), 3 an unexpected error (the traceback is written to `<out>/error_<time>.log`).
 
+## OCED - Olds College Extract Data
+
+A second, smaller app on the same code: `app/oced.py`, started with `run_oced.bat` (or
+`python -m streamlit run app\oced.py --server.port 8502`), at http://localhost:8502, so OCCD (8501) and OCED can run
+together. OCED opens the raw data exactly as OCCD does (every format of *Supported inputs*: Case IH / New Holland
+.cn1 cards, John Deere Gen4 / G5 logs and GreenStar 3 cards, SMS and Operations Center point exports, .kml / .kmz) and
+**extracts the chosen units as one point shapefile per field, season and crop**, so a card of many fields gives many
+files at once. For each file it draws the map of **every attribute**: one button per attribute (dry and wet yield,
+moisture, speed, width, distance, heading, elevation, time, mass, machine, dataset, field and the vendor's other
+columns) colours the strips the header swept (or the points) over the satellite image, with the legend, the
+statistics, the histogram, the attribute table and the first records. The cleaning is **the SMS 3-sigma sequence only**
+(*The SMS 3-sigma method* below: S0 import check, S2 Optimize Swath Widths, S3 speed, S4 moisture, S5 dry yield, k,
+grouping and the steps as settings), on one file or all of them, with the steps, the limits and the maps of the clean
+and the removed points; there is no OCCD cascade, no combine factor, no grower's weight and no field of interest. The
+output is `<name>_clean.zip` per file (the kept readings with every attribute, as SMS exports them after Optimize Swath
+Widths), all of them in one zip, the flagged points and the cleaning report. Work folder: `workspace_oced/` (set
+`OCED_WORKSPACE` to move it). `atualizar_app.bat` updates OCED with OCCD.
+
 ## The six steps of the app
 
 1. **Raw data.** Upload files (a zip, the `.shp` + `.shx` + `.dbf` + `.prj` (+ `.cpg`) of an export, or raw monitor
